@@ -9,8 +9,20 @@ def nikto_scan(target, port=80):
                "-nointeractive", "-Format", "txt"] + ssl_flag
         out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=90, text=True)
         for line in out.splitlines():
-            if line.startswith("+") and "OSVDB" not in line and "Server:" not in line:
-                findings.append(line.strip("+ ").strip())
+            line = line.strip("+ ").strip()
+            if not line:
+                continue
+            # Skip noisy/meta lines
+            if any(skip in line for skip in [
+                "OSVDB", "Server:", "Start Time:", "End Time:", "Target IP:",
+                "Target Hostname:", "Target Port:", "Platform:", "host(s) tested",
+                "Scan terminated", "No CGI", "CGI tests skipped"
+            ]):
+                continue
+            if line.startswith("-") or line.startswith("+"):
+                findings.append(line.strip("+ -").strip())
+            elif "VULNERABLE" in line or "missing" in line or "CVE" in line:
+                findings.append(line)
     except subprocess.TimeoutExpired:
         print(f"[Nikto] Timeout on {target}:{port}")
     except Exception as e:

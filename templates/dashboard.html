@@ -10,6 +10,11 @@
 </head>
 <body>
 
+<div id="scan-overlay">
+    <div class="spinner"></div>
+    <p id="scan-overlay-text">SCANNING NETWORK...</p>
+</div>
+
 <header>
     <div class="logo">&#9632; CYBERSCOPE AI</div>
     <div class="status">
@@ -108,6 +113,7 @@
         <button onclick="triggerSniff()">&#128246; SNIFF</button>
         <button onclick="loadAlerts()">&#9888; LOAD ALERTS</button>
         <button onclick="generateReport()">&#128196; EXPORT REPORT</button>
+        <button onclick="clearDB()" style="border-color:#ff4444;color:#ff4444">&#128465; CLEAR DB</button>
     </section>
 
 </main>

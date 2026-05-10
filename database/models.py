@@ -44,15 +44,33 @@ def save_device(ip, mac):
 
 def save_alert(alert, severity):
     conn = sqlite3.connect(DB)
-    conn.execute("INSERT INTO alerts (alert, severity, timestamp) VALUES (?,?,?)",
-                 (alert, severity, datetime.now().isoformat()))
+    c = conn.cursor()
+    c.execute("SELECT id FROM alerts WHERE alert=? AND severity=?", (alert, severity))
+    if not c.fetchone():
+        c.execute("INSERT INTO alerts (alert, severity, timestamp) VALUES (?,?,?)",
+                  (alert, severity, datetime.now().isoformat()))
+        conn.commit()
+    conn.close()
+
+def clear_db():
+    conn = sqlite3.connect(DB)
+    conn.execute("DELETE FROM devices")
+    conn.execute("DELETE FROM alerts")
+    conn.execute("DELETE FROM scan_results")
     conn.commit()
     conn.close()
 
 def save_scan_result(ip, data):
     conn = sqlite3.connect(DB)
-    conn.execute("INSERT INTO scan_results (ip, data, timestamp) VALUES (?,?,?)",
-                 (ip, json.dumps(data), datetime.now().isoformat()))
+    c = conn.cursor()
+    c.execute("SELECT id FROM scan_results WHERE ip=?", (ip,))
+    row = c.fetchone()
+    if row:
+        c.execute("UPDATE scan_results SET data=?, timestamp=? WHERE ip=?",
+                  (json.dumps(data), datetime.now().isoformat(), ip))
+    else:
+        c.execute("INSERT INTO scan_results (ip, data, timestamp) VALUES (?,?,?)",
+                  (ip, json.dumps(data), datetime.now().isoformat()))
     conn.commit()
     conn.close()
 

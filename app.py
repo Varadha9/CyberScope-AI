@@ -4,7 +4,7 @@ from scanner.device_scanner import scan_network, get_wifi_subnet
 from scanner.port_scanner import scan_ports
 from threat.detector import scan_threats
 from ai.behavior_analyzer import analyze
-from database.models import init_db, save_device, save_alert, get_all_devices, get_all_alerts, save_scan_result, get_scan_results
+from database.models import init_db, save_device, save_alert, get_all_devices, get_all_alerts, save_scan_result, get_scan_results, clear_db
 from reports.generator import generate_csv, generate_summary
 from kali_tools.nmap_advanced import os_detect, vuln_scan, service_scan
 from kali_tools.masscan_runner import masscan_quick
@@ -21,6 +21,18 @@ app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "cyberscopeai-secret-key
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 init_db()
+
+# Auto-clear DB if we're on a different subnet than last time
+_current_subnet = get_wifi_subnet() or "10.50.99.0/24"
+try:
+    import os as _os
+    _subnet_file = "logs/.last_subnet"
+    _last_subnet = open(_subnet_file).read().strip() if _os.path.exists(_subnet_file) else ""
+    if _last_subnet != _current_subnet:
+        clear_db()
+        open(_subnet_file, "w").write(_current_subnet)
+except Exception:
+    pass
 
 def log(msg, type="info"):
     print(f"[{type.upper()}] {msg}")
@@ -91,6 +103,9 @@ def run_scan():
     for d in nd_devices:
         if d["ip"] not in known_ips:
             devices.append(d)
+    # Filter out invalid IPs (0.0.0.0, localhost, our own IP)
+    own_ip = get_wifi_subnet().rsplit(".", 1)[0] + "." if get_wifi_subnet() else ""
+    devices = [d for d in devices if d["ip"] not in ("0.0.0.0", "127.0.0.1") and d["ip"] != ""]
     log(f"Device discovery done: {len(devices)} device(s) found", "success")
 
     results = []
@@ -141,6 +156,15 @@ def run_scan():
 def dashboard():
     return render_template("dashboard.html")
 
+@app.route("/api/clear_db", methods=["POST"])
+def api_clear_db():
+    clear_db()
+    return jsonify({"status": "cleared"})
+
+@app.route("/api/subnet")
+def api_subnet():
+    return jsonify({"subnet": get_target_subnet()})
+
 @app.route("/api/scan")
 def api_scan():
     return jsonify(run_scan())
@@ -183,7 +207,7 @@ def background_scan():
             run_scan()
         except Exception as e:
             log(f"Background scan error: {e}", "error")
-        time.sleep(120)
+        time.sleep(600)
 
 if __name__ == "__main__":
     t = threading.Thread(target=background_scan, daemon=True)

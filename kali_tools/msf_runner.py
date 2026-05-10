@@ -1,6 +1,12 @@
 import subprocess
 import tempfile
 import os
+import re
+
+ANSI_ESCAPE = re.compile(r'(\x9B|\x1B\[)[0-?]*[ -/]*[@-~]')
+
+def strip_ansi(text):
+    return ANSI_ESCAPE.sub('', text).strip()
 
 # Map ports to Metasploit auxiliary scanner modules
 PORT_MSF_MAP = {
@@ -51,9 +57,12 @@ def msf_check(target, open_ports):
             stderr=subprocess.DEVNULL, timeout=120, text=True
         )
         for line in out.splitlines():
-            line = line.strip()
-            if any(kw in line for kw in ["[+]", "version", "Banner", "Anonymous"]):
-                findings.append(line)
+                line = strip_ansi(line).strip()
+                if line and any(kw in line for kw in ["[+]", "version", "Banner", "Anonymous", "Host is running", "SMB Detected"]):
+                    # Skip RC script echo lines
+                    if line.startswith("resource (") or "use auxiliary" in line:
+                        continue
+                    findings.append(line)
     except subprocess.TimeoutExpired:
         print(f"[MSF] Timeout on {target}")
     except Exception as e:

@@ -168,13 +168,23 @@ function addAlert(message, severity) {
     feed.prepend(div);
 }
 
+function showSpinner(text) {
+    document.getElementById("scan-overlay-text").textContent = text || "SCANNING NETWORK...";
+    document.getElementById("scan-overlay").classList.add("active");
+}
+function hideSpinner() {
+    document.getElementById("scan-overlay").classList.remove("active");
+}
+
 function triggerScan() {
     log("▶ FULL SCAN triggered by user", "info");
     document.getElementById("ai-comment").textContent = "🤖 AI: Scanning WiFi network with Nmap + Nikto + Metasploit... 🔍";
     document.getElementById("status-text").textContent = "SCANNING...";
+    showSpinner("SCANNING NETWORK...");
     fetch("/api/scan")
         .then(r => r.json())
         .then(data => {
+            hideSpinner();
             if (data && data.length > 0) {
                 updateDeviceTable(data);
                 document.getElementById("total-devices").textContent = data.length;
@@ -183,6 +193,7 @@ function triggerScan() {
             log(`✔ Fast scan done — ${data.length || 0} device(s) found. Deep scan running in background...`, "success");
         })
         .catch(err => {
+            hideSpinner();
             document.getElementById("status-text").textContent = "MONITORING ACTIVE";
             log(`Scan error: ${err}`, "error");
         });
@@ -241,6 +252,22 @@ function loadAlerts() {
         .catch(err => log(`Error loading alerts: ${err}`, "error"));
 }
 
+function clearDB() {
+    if (!confirm("Clear all saved devices, alerts and scan results?")) return;
+    fetch("/api/clear_db", { method: "POST" })
+        .then(r => r.json())
+        .then(() => {
+            document.getElementById("device-body").innerHTML = '<tr><td colspan="7" class="empty">Database cleared — run a new scan</td></tr>';
+            document.getElementById("alert-feed").innerHTML = '<div class="empty">No alerts yet...</div>';
+            document.getElementById("total-devices").textContent = "0";
+            document.getElementById("total-alerts").textContent = "0";
+            document.getElementById("total-ports").textContent = "0";
+            document.getElementById("total-threats").textContent = "0";
+            document.getElementById("total-vulns").textContent = "0";
+            log("✔ Database cleared", "success");
+        });
+}
+
 function generateReport() {
     log("📄 Generating report...", "info");
     fetch("/api/report")
@@ -253,16 +280,37 @@ function generateReport() {
         .catch(err => log(`Error generating report: ${err}`, "error"));
 }
 
-loadAlerts();
-// Load last scan results (has ports/os/vulns) instead of bare device list
+// Load current subnet immediately
+fetch("/api/subnet")
+    .then(r => r.json())
+    .then(data => {
+        if (data.subnet) document.getElementById("subnet-badge").textContent = "WiFi: " + data.subnet;
+    });
+
+// Load last scan results and update ALL stats correctly
 fetch("/api/scan_results")
     .then(r => r.json())
     .then(results => {
-        if (results.length) {
-            const devices = results.map(r => r.data);
+        const devices = results.map(r => r.data);
+        if (devices.length) {
             updateDeviceTable(devices);
+            const threatCount = devices.reduce((s, d) => s + (d.threats?.length || 0), 0);
+            const vulnCount   = devices.reduce((s, d) => s + (d.vulns?.length  || 0), 0);
+            const portCount   = devices.reduce((s, d) => s + (d.ports?.length  || 0), 0);
             document.getElementById("total-devices").textContent = devices.length;
-        } else {
-            fetch("/api/devices").then(r => r.json()).then(updateDeviceTable);
+            document.getElementById("total-threats").textContent = threatCount;
+            document.getElementById("total-vulns").textContent   = vulnCount;
+            document.getElementById("total-ports").textContent   = portCount;
         }
+        // Load alerts AFTER devices so alert count reflects only current DB
+        fetch("/api/alerts")
+            .then(r => r.json())
+            .then(alerts => {
+                document.getElementById("total-alerts").textContent = alerts.length;
+                if (alerts.length === 0) {
+                    document.getElementById("alert-feed").innerHTML = '<div class="empty">No alerts yet...</div>';
+                } else {
+                    alerts.forEach(a => addAlert(a.alert, a.severity));
+                }
+            });
     });

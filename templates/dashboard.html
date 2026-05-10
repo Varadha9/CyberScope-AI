@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberScope AI</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<header>
+    <div class="logo">&#9632; CYBERSCOPE AI</div>
+    <div class="status">
+        <span id="status-dot" class="dot green"></span>
+        <span id="status-text">MONITORING ACTIVE</span>
+    </div>
+    <div class="time" id="clock"></div>
+</header>
+
+<main>
+
+    <!-- Stats Bar -->
+    <section class="stats-bar">
+        <div class="stat-card">
+            <div class="stat-label">DEVICES</div>
+            <div class="stat-value" id="total-devices">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">ALERTS</div>
+            <div class="stat-value red" id="total-alerts">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">OPEN PORTS</div>
+            <div class="stat-value yellow" id="total-ports">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">THREATS</div>
+            <div class="stat-value red" id="total-threats">0</div>
+        </div>
+    </section>
+
+    <section class="grid">
+
+        <!-- Device Table -->
+        <div class="panel">
+            <div class="panel-title">&#9632; CONNECTED DEVICES</div>
+            <table id="device-table">
+                <thead>
+                    <tr><th>IP</th><th>MAC</th><th>STATUS</th><th>COMMENT</th></tr>
+                </thead>
+                <tbody id="device-body">
+                    <tr><td colspan="4" class="empty">Waiting for scan...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Alerts Panel -->
+        <div class="panel">
+            <div class="panel-title">&#9632; THREAT ALERTS</div>
+            <div id="alert-feed">
+                <div class="empty">No alerts yet...</div>
+            </div>
+        </div>
+
+        <!-- Chart: Active Devices -->
+        <div class="panel">
+            <div class="panel-title">&#9632; DEVICE ACTIVITY</div>
+            <canvas id="deviceChart"></canvas>
+        </div>
+
+        <!-- Chart: Threat Levels -->
+        <div class="panel">
+            <div class="panel-title">&#9632; THREAT LEVELS</div>
+            <canvas id="threatChart"></canvas>
+        </div>
+
+    </section>
+
+    <!-- AI Comment -->
+    <section class="ai-comment" id="ai-comment">
+        &#128916; AI: Waiting for network data...
+    </section>
+
+    <!-- Controls -->
+    <section class="controls">
+        <button onclick="triggerScan()">&#9654; RUN SCAN</button>
+        <button onclick="loadAlerts()">&#9888; LOAD ALERTS</button>
+        <button onclick="generateReport()">&#128196; EXPORT REPORT</button>
+    </section>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

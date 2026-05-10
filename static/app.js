@@ -275,7 +275,7 @@ function clearDB() {
     fetch("/api/clear_db", { method: "POST" })
         .then(r => r.json())
         .then(() => {
-            document.getElementById("device-body").innerHTML = '<tr><td colspan="7" class="empty">Database cleared — run a new scan</td></tr>';
+            document.getElementById("device-body").innerHTML = '<tr><td colspan="9" class="empty">Database cleared — run a new scan</td></tr>';
             document.getElementById("alert-feed").innerHTML = '<div class="empty">No alerts yet...</div>';
             document.getElementById("total-devices").textContent = "0";
             document.getElementById("total-alerts").textContent = "0";
@@ -321,16 +321,6 @@ function triggerTshark() {
 }
 
 function generateReport() {
-    log("📄 Generating report...", "info");
-    fetch("/api/report")
-        .then(r => r.json())
-        .then(data => {
-            document.getElementById("ai-comment").textContent =
-                `🤖 AI: Report saved! Devices: ${data.total_devices} | Alerts: ${data.total_alerts} | High Risk: ${data.high_risk_alerts} | File: ${data.report_file}`;
-            log(`✔ Report generated: ${data.report_file}`, "success");
-        })
-        .catch(err => log(`Error generating report: ${err}`, "error"));
-}
     log("📄 Generating report...", "info");
     fetch("/api/report")
         .then(r => r.json())

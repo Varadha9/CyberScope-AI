@@ -10,6 +10,20 @@ from kali_tools.nmap_advanced import os_detect, vuln_scan, service_scan
 from kali_tools.masscan_runner import masscan_quick
 from kali_tools.nikto_runner import nikto_scan
 from kali_tools.msf_runner import msf_check
+from kali_tools.wpscan_runner import wpscan
+from kali_tools.sqlmap_runner import sqlmap_scan
+from kali_tools.hydra_runner import hydra_scan
+from kali_tools.enum4linux_runner import enum4linux_scan
+from kali_tools.gobuster_runner import gobuster_scan
+from kali_tools.whatweb_runner import whatweb_scan
+from kali_tools.sslscan_runner import sslscan_scan
+from kali_tools.wfuzz_runner import wfuzz_scan
+from kali_tools.dnsrecon_runner import dnsrecon_scan
+from kali_tools.fierce_runner import fierce_scan
+from kali_tools.netcat_runner import netcat_banner
+from kali_tools.searchsploit_runner import searchsploit_scan
+from kali_tools.tcpdump_runner import tcpdump_capture
+from kali_tools.tshark_runner import tshark_capture
 from kali_tools.netdiscover_runner import netdiscover_scan
 from sniffer.packet_sniffer import start_sniff
 import threading
@@ -69,6 +83,82 @@ def deep_scan(ip, ports, result):
         msf_results = msf_check(ip, ports)
         log(f"[{ip}] MSF done: {len(msf_results)} finding(s)", "warn" if msf_results else "success")
 
+        # WhatWeb
+        whatweb_results = []
+        for p in ports:
+            if p in (80, 443, 8080, 8443):
+                log(f"[{ip}] Running WhatWeb on port {p}...", "tool")
+                whatweb_results = whatweb_scan(ip, p)
+                log(f"[{ip}] WhatWeb done: {len(whatweb_results)} finding(s)", "success")
+                break
+
+        # WPScan
+        wpscan_results = []
+        for p in ports:
+            if p in (80, 443, 8080, 8443):
+                log(f"[{ip}] Running WPScan on port {p}...", "tool")
+                wpscan_results = wpscan(ip, p)
+                log(f"[{ip}] WPScan done: {len(wpscan_results)} finding(s)", "warn" if wpscan_results else "success")
+                break
+
+        # SQLMap
+        sqlmap_results = []
+        for p in ports:
+            if p in (80, 443, 8080, 8443):
+                log(f"[{ip}] Running SQLMap on port {p}...", "tool")
+                sqlmap_results = sqlmap_scan(ip, p)
+                log(f"[{ip}] SQLMap done: {len(sqlmap_results)} finding(s)", "warn" if sqlmap_results else "success")
+                break
+
+        # Gobuster
+        gobuster_results = []
+        for p in ports:
+            if p in (80, 443, 8080, 8443):
+                log(f"[{ip}] Running Gobuster on port {p}...", "tool")
+                gobuster_results = gobuster_scan(ip, p)
+                log(f"[{ip}] Gobuster done: {len(gobuster_results)} path(s)", "success")
+                break
+
+        # Wfuzz
+        wfuzz_results = []
+        for p in ports:
+            if p in (80, 443, 8080, 8443):
+                log(f"[{ip}] Running Wfuzz on port {p}...", "tool")
+                wfuzz_results = wfuzz_scan(ip, p)
+                log(f"[{ip}] Wfuzz done: {len(wfuzz_results)} finding(s)", "success")
+                break
+
+        # SSLScan
+        sslscan_results = []
+        for p in ports:
+            if p in (443, 8443):
+                log(f"[{ip}] Running SSLScan on port {p}...", "tool")
+                sslscan_results = sslscan_scan(ip, p)
+                log(f"[{ip}] SSLScan done: {len(sslscan_results)} finding(s)", "warn" if sslscan_results else "success")
+                break
+
+        # Hydra
+        log(f"[{ip}] Running Hydra brute-force check...", "tool")
+        hydra_results = hydra_scan(ip, ports)
+        log(f"[{ip}] Hydra done: {len(hydra_results)} credential(s) found", "warn" if hydra_results else "success")
+
+        # Enum4linux (SMB/Windows)
+        enum4linux_results = []
+        if any(p in ports for p in (139, 445)):
+            log(f"[{ip}] Running Enum4linux...", "tool")
+            enum4linux_results = enum4linux_scan(ip)
+            log(f"[{ip}] Enum4linux done: {len(enum4linux_results)} finding(s)", "success")
+
+        # SearchSploit
+        log(f"[{ip}] Running SearchSploit for CVE matches...", "tool")
+        searchsploit_results = searchsploit_scan(services)
+        log(f"[{ip}] SearchSploit done: {len(searchsploit_results)} exploit(s) found", "warn" if searchsploit_results else "success")
+
+        # Netcat banner grab
+        log(f"[{ip}] Running Netcat banner grab...", "tool")
+        nc_banners = netcat_banner(ip, ports)
+        log(f"[{ip}] Netcat done: {len(nc_banners)} banner(s)", "success")
+
         comment = analyze(ports, services)
 
         for v in vulns:
@@ -84,7 +174,12 @@ def deep_scan(ip, ports, result):
         result.update({
             "services": services, "os": os_info,
             "vulns": vulns, "nikto": nikto_results,
-            "msf": msf_results, "comment": comment
+            "msf": msf_results, "comment": comment,
+            "whatweb": whatweb_results, "wpscan": wpscan_results,
+            "sqlmap": sqlmap_results, "gobuster": gobuster_results,
+            "wfuzz": wfuzz_results, "sslscan": sslscan_results,
+            "hydra": hydra_results, "enum4linux": enum4linux_results,
+            "searchsploit": searchsploit_results, "nc_banners": nc_banners,
         })
         save_scan_result(ip, result)
         socketio.emit("device_update", {"ip": ip, "data": result})
@@ -131,11 +226,14 @@ def run_scan():
             socketio.emit("alert", {"message": msg, "severity": t["risk"]})
 
         result = {
-            "ip": ip, "mac": mac,
+            "ip": ip, "mac": mac, "hostname": d.get("hostname", "unknown"),
             "ports": ports, "services": {},
             "os": "Scanning...", "threats": threats,
             "vulns": [], "nikto": [], "msf": [],
-            "comment": comment
+            "whatweb": [], "wpscan": [], "sqlmap": [],
+            "gobuster": [], "wfuzz": [], "sslscan": [],
+            "hydra": [], "enum4linux": [], "searchsploit": [],
+            "nc_banners": {}, "comment": comment
         }
         results.append(result)
         save_scan_result(ip, result)
@@ -180,6 +278,30 @@ def api_sniff():
     count = int(request.args.get("count", 30))
     packets = start_sniff(count=count, iface="wlan0")
     return jsonify(packets)
+
+@app.route("/api/tcpdump")
+def api_tcpdump():
+    count = int(request.args.get("count", 20))
+    return jsonify(tcpdump_capture(iface="wlan0", count=count))
+
+@app.route("/api/tshark")
+def api_tshark():
+    count = int(request.args.get("count", 20))
+    return jsonify(tshark_capture(iface="wlan0", count=count))
+
+@app.route("/api/dnsrecon")
+def api_dnsrecon():
+    target = request.args.get("target", "")
+    if not target:
+        return jsonify({"error": "target required"}), 400
+    return jsonify(dnsrecon_scan(target))
+
+@app.route("/api/fierce")
+def api_fierce():
+    target = request.args.get("target", "")
+    if not target:
+        return jsonify({"error": "target required"}), 400
+    return jsonify(fierce_scan(target))
 
 @app.route("/api/devices")
 def api_devices():

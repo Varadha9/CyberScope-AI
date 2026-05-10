@@ -57,10 +57,10 @@
             <div class="panel-title">&#9632; CONNECTED DEVICES (WiFi)</div>
             <table id="device-table">
                 <thead>
-                    <tr><th>IP</th><th>MAC</th><th>OS</th><th>OPEN PORTS</th><th>THREATS</th><th>VULNS</th><th>COMMENT</th></tr>
+                    <tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>OS</th><th>OPEN PORTS</th><th>THREATS</th><th>VULNS</th><th>TOOLS</th><th>COMMENT</th></tr>
                 </thead>
                 <tbody id="device-body">
-                    <tr><td colspan="7" class="empty">Waiting for scan...</td></tr>
+                    <tr><td colspan="9" class="empty">Waiting for scan...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -111,6 +111,8 @@
         <button onclick="triggerScan()">&#9654; FULL SCAN</button>
         <button onclick="triggerMasscan()">&#9889; MASSCAN</button>
         <button onclick="triggerSniff()">&#128246; SNIFF</button>
+        <button onclick="triggerTcpdump()">&#128225; TCPDUMP</button>
+        <button onclick="triggerTshark()">&#128270; TSHARK</button>
         <button onclick="loadAlerts()">&#9888; LOAD ALERTS</button>
         <button onclick="generateReport()">&#128196; EXPORT REPORT</button>
         <button onclick="clearDB()" style="border-color:#ff4444;color:#ff4444">&#128465; CLEAR DB</button>

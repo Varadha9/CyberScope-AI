@@ -86,7 +86,6 @@ socket.on("scan_complete", (data) => {
 });
 
 socket.on("device_update", (data) => {
-    // Update a single row in the table when deep scan completes
     const tbody = document.getElementById("device-body");
     const rows = tbody.querySelectorAll("tr");
     rows.forEach(row => {
@@ -101,11 +100,22 @@ socket.on("device_update", (data) => {
             const vulnBadge = d.vulns?.length
                 ? `<span class="critical">💀 ${d.vulns.length} VULN(S)</span>`
                 : `<span class="green">—</span>`;
-            row.cells[2].textContent = d.os || "?";
-            row.cells[3].innerHTML   = `<span class="yellow">${ports}</span>`;
-            row.cells[4].innerHTML   = threatBadge;
-            row.cells[5].innerHTML   = vulnBadge;
-            row.cells[6].textContent = d.comment || "—";
+            const toolBadges = [
+                d.wpscan?.length   ? `<span class="yellow">WP:${d.wpscan.length}</span>` : "",
+                d.sqlmap?.length   ? `<span class="red">SQL:${d.sqlmap.length}</span>` : "",
+                d.hydra?.length    ? `<span class="critical">HYD:${d.hydra.length}</span>` : "",
+                d.gobuster?.length ? `<span class="yellow">DIR:${d.gobuster.length}</span>` : "",
+                d.sslscan?.length  ? `<span class="yellow">SSL:${d.sslscan.length}</span>` : "",
+                d.searchsploit?.length ? `<span class="red">CVE:${d.searchsploit.length}</span>` : "",
+                d.enum4linux?.length   ? `<span class="yellow">SMB:${d.enum4linux.length}</span>` : "",
+            ].filter(Boolean).join(" ") || "<span class='green'>—</span>";
+            row.cells[1].textContent = d.hostname || "unknown";
+            row.cells[3].textContent = d.os || "?";
+            row.cells[4].innerHTML   = `<span class="yellow">${ports}</span>`;
+            row.cells[5].innerHTML   = threatBadge;
+            row.cells[6].innerHTML   = vulnBadge;
+            row.cells[7].innerHTML   = toolBadges;
+            row.cells[8].textContent = d.comment || "—";
         }
     });
 });
@@ -123,10 +133,9 @@ socket.on("alert", (data) => {
 function updateDeviceTable(devices) {
     const tbody = document.getElementById("device-body");
     if (!devices || !devices.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty">No devices found on WiFi</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="empty">No devices found on WiFi</td></tr>';
         return;
     }
-    // Remove duplicates by IP (keep last occurrence)
     const uniqueDevices = [];
     const seenIPs = new Set();
     for (let i = devices.length - 1; i >= 0; i--) {
@@ -145,13 +154,24 @@ function updateDeviceTable(devices) {
         const ports = (Array.isArray(d.ports) && d.ports.length)
             ? d.ports.slice(0, 8).join(", ") + (d.ports.length > 8 ? "..." : "")
             : "—";
+        const toolBadges = [
+            d.wpscan?.length   ? `<span class="yellow">WP:${d.wpscan.length}</span>` : "",
+            d.sqlmap?.length   ? `<span class="red">SQL:${d.sqlmap.length}</span>` : "",
+            d.hydra?.length    ? `<span class="critical">HYD:${d.hydra.length}</span>` : "",
+            d.gobuster?.length ? `<span class="yellow">DIR:${d.gobuster.length}</span>` : "",
+            d.sslscan?.length  ? `<span class="yellow">SSL:${d.sslscan.length}</span>` : "",
+            d.searchsploit?.length ? `<span class="red">CVE:${d.searchsploit.length}</span>` : "",
+            d.enum4linux?.length   ? `<span class="yellow">SMB:${d.enum4linux.length}</span>` : "",
+        ].filter(Boolean).join(" ") || "<span class='green'>—</span>";
         return `<tr>
             <td>${d.ip}</td>
+            <td>${d.hostname || "unknown"}</td>
             <td>${d.mac}</td>
             <td>${d.os || "?"}</td>
             <td class="yellow">${ports}</td>
             <td>${threatBadge}</td>
             <td>${vulnBadge}</td>
+            <td>${toolBadges}</td>
             <td>${d.comment || "—"}</td>
         </tr>`;
     }).join("");
@@ -268,7 +288,51 @@ function clearDB() {
         });
 }
 
+function triggerTcpdump() {
+    log("📡 Tcpdump capture started on wlan0", "info");
+    fetch("/api/tcpdump?count=20")
+        .then(r => r.json())
+        .then(packets => {
+            const feed = document.getElementById("packet-feed");
+            feed.innerHTML = "";
+            packets.forEach(p => {
+                const div = document.createElement("div");
+                div.className = "packet-item";
+                div.textContent = p;
+                feed.appendChild(div);
+            });
+            log(`📡 Tcpdump done — ${packets.length} packets`, "success");
+        });
+}
+
+function triggerTshark() {
+    log("🔍 Tshark capture started on wlan0", "info");
+    fetch("/api/tshark?count=20")
+        .then(r => r.json())
+        .then(packets => {
+            const feed = document.getElementById("packet-feed");
+            feed.innerHTML = "";
+            packets.forEach(p => {
+                const div = document.createElement("div");
+                div.className = "packet-item";
+                div.textContent = `${p.src}:${p.sport} → ${p.dst}:${p.dport} [${p.proto}] ${p.len}B`;
+                feed.appendChild(div);
+            });
+            log(`🔍 Tshark done — ${packets.length} packets`, "success");
+        });
+}
+
 function generateReport() {
+    log("📄 Generating report...", "info");
+    fetch("/api/report")
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById("ai-comment").textContent =
+                `🤖 AI: Report saved! Devices: ${data.total_devices} | Alerts: ${data.total_alerts} | High Risk: ${data.high_risk_alerts} | File: ${data.report_file}`;
+            log(`✔ Report generated: ${data.report_file}`, "success");
+        })
+        .catch(err => log(`Error generating report: ${err}`, "error"));
+}
     log("📄 Generating report...", "info");
     fetch("/api/report")
         .then(r => r.json())

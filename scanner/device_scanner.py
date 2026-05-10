@@ -1,6 +1,13 @@
 import subprocess
 import re
+import socket
 from scapy.all import ARP, Ether, srp
+
+def resolve_hostname(ip):
+    try:
+        return socket.gethostbyaddr(ip)[0]
+    except Exception:
+        return "unknown"
 
 def get_wifi_subnet():
     """Auto-detect WiFi subnet — use /24 around our IP for practical ARP scanning"""
@@ -26,7 +33,7 @@ def get_gateway():
             arp_out = subprocess.check_output(["arp", "-n", gw_ip], text=True)
             mac_m = re.search(r"([0-9a-f:]{17})", arp_out, re.IGNORECASE)
             mac = mac_m.group(1) if mac_m else "00:00:00:00:00:00"
-            return [{"ip": gw_ip, "mac": mac}]
+            return [{"ip": gw_ip, "mac": mac, "hostname": resolve_hostname(gw_ip)}]
     except Exception:
         pass
     return []
@@ -46,7 +53,7 @@ def nmap_ping_scan(subnet):
                 current_ip = ip_m.group(1)
             mac_m = re.search(r"MAC Address: ([0-9A-F:]{17})", line, re.IGNORECASE)
             if mac_m and current_ip:
-                devices.append({"ip": current_ip, "mac": mac_m.group(1)})
+                devices.append({"ip": current_ip, "mac": mac_m.group(1), "hostname": resolve_hostname(current_ip)})
                 current_ip = None
     except Exception as e:
         print(f"[Nmap Ping Scan Error] {e}")
@@ -59,7 +66,7 @@ def scan_network(ip_range, iface="wlan0"):
         arp = ARP(pdst=ip_range)
         ether = Ether(dst="ff:ff:ff:ff:ff:ff")
         result = srp(ether / arp, timeout=5, verbose=0, iface=iface)[0]
-        devices = [{"ip": r.psrc, "mac": r.hwsrc} for _, r in result]
+        devices = [{"ip": r.psrc, "mac": r.hwsrc, "hostname": resolve_hostname(r.psrc)} for _, r in result]
         if devices:
             print(f"[ARP Scan] Found {len(devices)} device(s)")
             return devices

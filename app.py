@@ -324,6 +324,7 @@ def api_report():
     return jsonify(summary)
 
 def background_scan():
+    time.sleep(15)  # Wait for app to fully start
     while True:
         try:
             log("Background scan cycle started", "info")

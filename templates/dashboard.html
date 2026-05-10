@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CyberScope AI</title>
+    <title>CyberScope AI — Dashboard</title>
     <link rel="stylesheet" href="/static/style.css">
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -15,110 +15,174 @@
     <p id="scan-overlay-text">SCANNING NETWORK...</p>
 </div>
 
-<header>
-    <div class="logo">&#9632; CYBERSCOPE AI</div>
-    <div class="status">
-        <span id="status-dot" class="dot green"></span>
-        <span id="status-text">MONITORING ACTIVE</span>
+<!-- Sidebar -->
+<nav class="sidebar">
+    <div class="sidebar-logo">
+        <div class="logo-text">⬡ CYBERSCOPE</div>
+        <div class="logo-sub">AI NETWORK SCANNER</div>
     </div>
-    <div class="subnet-badge" id="subnet-badge">WiFi: detecting...</div>
-    <div class="time" id="clock"></div>
-</header>
+    <a href="/" class="nav-item active"><span class="nav-icon">🏠</span><span>Dashboard</span></a>
+    <a href="/alerts" class="nav-item"><span class="nav-icon">🔔</span><span>Alerts</span></a>
+    <a href="/map" class="nav-item"><span class="nav-icon">🗺️</span><span>Network Map</span></a>
+    <a href="/reports" class="nav-item"><span class="nav-icon">📄</span><span>Reports</span></a>
+    <div class="sidebar-status">
+        <span class="status-dot"></span>
+        <span id="sidebar-status-text">MONITORING</span>
+    </div>
+</nav>
 
-<main>
+<!-- Main -->
+<div class="main-content">
+    <div class="topbar">
+        <div class="topbar-title">Network Overview</div>
+        <div class="topbar-right">
+            <span class="topbar-badge" id="subnet-badge">WiFi: detecting...</span>
+            <span id="status-text" style="font-size:0.75rem;color:var(--green);font-family:'Courier New',monospace">MONITORING ACTIVE</span>
+            <span class="topbar-time" id="clock"></span>
+        </div>
+    </div>
 
-    <section class="stats-bar">
-        <div class="stat-card">
-            <div class="stat-label">DEVICES</div>
-            <div class="stat-value" id="total-devices">0</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">ALERTS</div>
-            <div class="stat-value red" id="total-alerts">0</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">OPEN PORTS</div>
-            <div class="stat-value yellow" id="total-ports">0</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">THREATS</div>
-            <div class="stat-value red" id="total-threats">0</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">VULNS</div>
-            <div class="stat-value critical" id="total-vulns">0</div>
-        </div>
-    </section>
+    <!-- Controls -->
+    <div class="controls-bar">
+        <button class="btn btn-primary scan-btn" onclick="triggerScan()" id="btn-scan" title="Full network scan with all tools">▶ Full Scan</button>
+        <button class="btn scan-btn" onclick="triggerMasscan()" title="Fast port scan across subnet">⚡ Masscan</button>
+        <button class="btn btn-cyan scan-btn" onclick="triggerSniff()" title="Capture live packets on wlan0">📶 Sniff</button>
+        <button class="btn btn-cyan scan-btn" onclick="triggerTcpdump()" title="Tcpdump capture">📡 Tcpdump</button>
+        <button class="btn btn-cyan scan-btn" onclick="triggerTshark()" title="Tshark capture">🔎 Tshark</button>
+        <button class="btn" onclick="loadAlerts()" title="Reload alerts from database">⚠ Load Alerts</button>
+        <button class="btn" onclick="generateReport()" title="Generate CSV report">📄 Export Report</button>
+        <button class="btn btn-danger btn-sm" onclick="clearDB()" title="Clear all scan data">🗑 Clear DB</button>
+    </div>
 
-    <section class="grid">
+    <!-- Scan Progress Bar -->
+    <div id="scan-progress-bar" style="display:none;padding:0 28px 12px;background:var(--bg2);border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:12px">
+            <span id="scan-progress-label" style="font-size:0.75rem;color:var(--cyan);font-family:'Courier New',monospace;min-width:180px">Scanning...</span>
+            <div style="flex:1;height:4px;background:var(--bg3);border-radius:2px;overflow:hidden">
+                <div id="scan-progress-fill" style="height:100%;background:var(--cyan);border-radius:2px;width:0%;transition:width 0.4s"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="page">
+
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-card cyan" onclick="scrollToDevices()" title="Click to jump to device table" style="cursor:pointer">
+                <div class="stat-icon">🖥️</div>
+                <div class="stat-label">Devices</div>
+                <div class="stat-value" id="total-devices">0</div>
+            </div>
+            <div class="stat-card red" onclick="window.location='/alerts'" title="View all alerts" style="cursor:pointer">
+                <div class="stat-icon">🔔</div>
+                <div class="stat-label">Alerts</div>
+                <div class="stat-value" id="total-alerts">0</div>
+            </div>
+            <div class="stat-card yellow">
+                <div class="stat-icon">🔓</div>
+                <div class="stat-label">Open Ports</div>
+                <div class="stat-value" id="total-ports">0</div>
+            </div>
+            <div class="stat-card red">
+                <div class="stat-icon">⚠️</div>
+                <div class="stat-label">Threats</div>
+                <div class="stat-value" id="total-threats">0</div>
+            </div>
+            <div class="stat-card critical">
+                <div class="stat-icon">💀</div>
+                <div class="stat-label">Vulns</div>
+                <div class="stat-value" id="total-vulns">0</div>
+            </div>
+        </div>
+
+        <!-- AI Bar -->
+        <div class="ai-bar">
+            <span class="ai-icon">🤖</span>
+            <span id="ai-comment">Waiting for network data... Click ▶ Full Scan to begin.</span>
+        </div>
 
         <!-- Device Table -->
-        <div class="panel span2">
-            <div class="panel-title">&#9632; CONNECTED DEVICES (WiFi)</div>
-            <table id="device-table">
-                <thead>
-                    <tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>OS</th><th>OPEN PORTS</th><th>THREATS</th><th>VULNS</th><th>TOOLS</th><th>COMMENT</th></tr>
-                </thead>
-                <tbody id="device-body">
-                    <tr><td colspan="9" class="empty">Waiting for scan...</td></tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Live Terminal Log -->
-        <div class="panel span2" id="terminal-panel">
-            <div class="panel-title">&#9632; BACKGROUND ACTIVITY LOG
-                <span class="terminal-clear" onclick="clearLog()">[CLEAR]</span>
+        <div class="panel section-gap" id="devices-section">
+            <div class="panel-header">
+                <div class="panel-title"><span class="dot-indicator"></span> Connected Devices</div>
+                <span class="text-dim" style="font-size:0.75rem" id="device-count-label"></span>
             </div>
-            <div id="terminal-log"></div>
-        </div>
-
-        <!-- Alerts Panel -->
-        <div class="panel">
-            <div class="panel-title">&#9632; THREAT ALERTS</div>
-            <div id="alert-feed">
-                <div class="empty">No alerts yet...</div>
+            <div class="panel-body no-pad">
+                <table class="device-table">
+                    <thead>
+                        <tr>
+                            <th>Device / IP</th>
+                            <th>MAC</th>
+                            <th>OS</th>
+                            <th>Risk Score</th>
+                            <th>Threats</th>
+                            <th>Vulns</th>
+                            <th>Tools</th>
+                            <th>AI Note</th>
+                        </tr>
+                    </thead>
+                    <tbody id="device-body">
+                        <tr><td colspan="8" class="empty-state">Waiting for scan... Click ▶ Full Scan to start</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
-        <!-- Packet Sniffer -->
-        <div class="panel">
-            <div class="panel-title">&#9632; LIVE PACKETS (wlan0)</div>
-            <div id="packet-feed">
-                <div class="empty">Click SNIFF to capture...</div>
+        <!-- Grid: Log + Alerts -->
+        <div class="grid-2 section-gap">
+            <!-- Terminal Log -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">⚡ Activity Log</div>
+                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                        <button class="filter-btn log-filter-btn active" onclick="setLogFilter(this,'ALL')">ALL</button>
+                        <button class="filter-btn log-filter-btn high" onclick="setLogFilter(this,'ERRORS')">ERRORS</button>
+                        <button class="filter-btn log-filter-btn medium" onclick="setLogFilter(this,'TOOLS')">TOOLS</button>
+                        <button class="filter-btn log-filter-btn low" onclick="setLogFilter(this,'SUCCESS')">SUCCESS</button>
+                        <button class="btn btn-sm btn-cyan" id="autoscroll-btn" onclick="toggleAutoScroll(this)" style="padding:3px 8px;font-size:0.68rem">⏬ Auto</button>
+                        <button class="btn btn-sm" onclick="clearLog()" style="padding:3px 8px;font-size:0.68rem">Clear</button>
+                    </div>
+                </div>
+                <div class="terminal-log" id="terminal-log"></div>
+            </div>
+
+            <!-- Alerts -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><span class="dot-indicator"></span> Live Threat Alerts</div>
+                    <a href="/alerts" class="btn btn-sm">View All →</a>
+                </div>
+                <div class="panel-body no-pad" id="alert-feed">
+                    <div class="empty-state"><div class="empty-icon">🛡️</div>No alerts yet...</div>
+                </div>
             </div>
         </div>
 
-        <!-- Chart: Active Devices -->
-        <div class="panel">
-            <div class="panel-title">&#9632; DEVICE ACTIVITY</div>
-            <canvas id="deviceChart"></canvas>
+        <!-- Grid: Charts -->
+        <div class="grid-2 section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">📈 Device Activity</div></div>
+                <div class="panel-body"><canvas id="deviceChart"></canvas></div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">📊 Threat Levels</div></div>
+                <div class="panel-body"><canvas id="threatChart"></canvas></div>
+            </div>
         </div>
 
-        <!-- Chart: Threat Levels -->
+        <!-- Packet Feed -->
         <div class="panel">
-            <div class="panel-title">&#9632; THREAT LEVELS</div>
-            <canvas id="threatChart"></canvas>
+            <div class="panel-header">
+                <div class="panel-title">📡 Live Packets (wlan0)</div>
+                <span class="text-dim" style="font-size:0.72rem">Use SNIFF / TCPDUMP / TSHARK buttons above</span>
+            </div>
+            <div class="panel-body" id="packet-feed">
+                <div class="empty-state"><div class="empty-icon">📡</div>Click SNIFF, TCPDUMP or TSHARK to capture packets</div>
+            </div>
         </div>
 
-    </section>
-
-    <section class="ai-comment" id="ai-comment">
-        &#128916; AI: Waiting for network data...
-    </section>
-
-    <section class="controls">
-        <button onclick="triggerScan()">&#9654; FULL SCAN</button>
-        <button onclick="triggerMasscan()">&#9889; MASSCAN</button>
-        <button onclick="triggerSniff()">&#128246; SNIFF</button>
-        <button onclick="triggerTcpdump()">&#128225; TCPDUMP</button>
-        <button onclick="triggerTshark()">&#128270; TSHARK</button>
-        <button onclick="loadAlerts()">&#9888; LOAD ALERTS</button>
-        <button onclick="generateReport()">&#128196; EXPORT REPORT</button>
-        <button onclick="clearDB()" style="border-color:#ff4444;color:#ff4444">&#128465; CLEAR DB</button>
-    </section>
-
-</main>
+    </div>
+</div>
 
 <script src="/static/app.js"></script>
 </body>

@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberScope AI — Network Map</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+</head>
+<body>
+<nav class="sidebar">
+    <div class="sidebar-logo">
+        <div class="logo-text">⬡ CYBERSCOPE</div>
+        <div class="logo-sub">AI NETWORK SCANNER</div>
+    </div>
+    <a href="/" class="nav-item"><span class="nav-icon">🏠</span><span>Dashboard</span></a>
+    <a href="/alerts" class="nav-item"><span class="nav-icon">🔔</span><span>Alerts</span></a>
+    <a href="/map" class="nav-item active"><span class="nav-icon">🗺️</span><span>Network Map</span></a>
+    <a href="/reports" class="nav-item"><span class="nav-icon">📄</span><span>Reports</span></a>
+    <div class="sidebar-status"><span class="status-dot"></span><span>MONITORING</span></div>
+</nav>
+
+<div class="main-content">
+    <div class="topbar">
+        <div class="topbar-title">🗺️ Network Map</div>
+        <div class="topbar-right">
+            <span class="topbar-badge" id="device-count-badge">0 devices</span>
+            <span class="topbar-time" id="clock"></span>
+        </div>
+    </div>
+
+    <div class="page">
+        <div class="panel" style="margin-bottom:16px">
+            <div class="panel-header">
+                <div class="panel-title">Live Network Topology</div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span style="font-size:0.72rem;color:var(--text-dim)">Click a device to view details</span>
+                    <button class="btn btn-sm btn-primary" onclick="loadMap()">🔄 Refresh</button>
+                </div>
+            </div>
+            <div style="position:relative">
+                <canvas id="map-canvas" style="width:100%;display:block;cursor:pointer"></canvas>
+                <div id="map-tooltip" class="map-tooltip" style="display:none"></div>
+            </div>
+        </div>
+
+        <!-- Legend -->
+        <div class="panel">
+            <div class="panel-header"><div class="panel-title">Legend</div></div>
+            <div class="panel-body" style="display:flex;gap:24px;flex-wrap:wrap;padding:14px 18px">
+                <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem"><span style="width:14px;height:14px;border-radius:50%;background:#ff00aa;display:inline-block"></span> Critical Risk</div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem"><span style="width:14px;height:14px;border-radius:50%;background:#ff4444;display:inline-block"></span> High Risk</div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem"><span style="width:14px;height:14px;border-radius:50%;background:#ffd700;display:inline-block"></span> Medium Risk</div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem"><span style="width:14px;height:14px;border-radius:50%;background:#00ff88;display:inline-block"></span> Safe</div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem"><span style="width:14px;height:14px;border-radius:50%;background:#00d4ff;display:inline-block"></span> Router / Gateway</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+setInterval(() => { document.getElementById("clock").textContent = new Date().toLocaleTimeString(); }, 1000);
+
+const socket = io();
+socket.on("scan_complete", () => loadMap());
+socket.on("device_update", () => loadMap());
+
+const canvas = document.getElementById("map-canvas");
+const ctx = canvas.getContext("2d");
+const tooltip = document.getElementById("map-tooltip");
+let nodes = [];
+
+function getRiskScore(d) {
+    let s = 0;
+    s += (d.threats?.length || 0) * 15;
+    s += (d.vulns?.length || 0) * 20;
+    s += (d.nikto?.length || 0) * 5;
+    s += (d.msf?.length || 0) * 10;
+    s += (d.hydra?.length || 0) * 25;
+    s += (d.sqlmap?.length || 0) * 20;
+    return Math.min(s, 100);
+}
+
+function getRiskColor(score, d) {
+    const h = (d.hostname || "").toLowerCase();
+    if (h.includes("router") || h.includes("fiber") || h.includes("jio") || h.includes("gateway")) return "#00d4ff";
+    if (score >= 70) return "#ff00aa";
+    if (score >= 50) return "#ff4444";
+    if (score >= 20) return "#ffd700";
+    return "#00ff88";
+}
+
+function getDeviceIcon(d) {
+    const h = (d.hostname || "").toLowerCase();
+    const o = (d.os || "").toLowerCase();
+    if (h.includes("router") || h.includes("fiber") || h.includes("jio") || h.includes("gateway")) return "🌐";
+    if (h.includes("phone") || h.includes("android") || h.includes("vivo") || h.includes("redmi") || h.includes("samsung")) return "📱";
+    if (h.includes("camera") || h.includes("nvr") || h.includes("hik")) return "📷";
+    if (h.includes("laptop")) return "💻";
+    if (o.includes("windows") || h.includes("desktop") || h.includes("pc")) return "🖥️";
+    if (o.includes("linux")) return "🐧";
+    return "📡";
+}
+
+function drawMap(devices) {
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.parentElement.clientWidth;
+    const H = Math.max(500, Math.min(700, W * 0.55));
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.height = H + "px";
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+
+    // Background grid
+    ctx.strokeStyle = "#161b2244";
+    ctx.lineWidth = 1;
+    for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+
+    if (!devices.length) {
+        ctx.fillStyle = "#8b949e";
+        ctx.font = "14px 'Courier New'";
+        ctx.textAlign = "center";
+        ctx.fillText("No devices found — run a scan first", W / 2, H / 2);
+        return;
+    }
+
+    // Router in center
+    const cx = W / 2, cy = H / 2;
+    const radius = Math.min(W, H) * 0.35;
+
+    nodes = [];
+
+    // Find router
+    let routerIdx = devices.findIndex(d => {
+        const h = (d.hostname || "").toLowerCase();
+        return h.includes("router") || h.includes("fiber") || h.includes("jio") || h.includes("gateway");
+    });
+    if (routerIdx === -1) routerIdx = 0;
+
+    const router = devices[routerIdx];
+    const others = devices.filter((_, i) => i !== routerIdx);
+
+    // Draw connection lines first
+    others.forEach((d, i) => {
+        const angle = (2 * Math.PI * i) / others.length - Math.PI / 2;
+        const nx = cx + radius * Math.cos(angle);
+        const ny = cy + radius * Math.sin(angle);
+        const score = getRiskScore(d);
+        const color = getRiskColor(score, d);
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(nx, ny);
+        const grad = ctx.createLinearGradient(cx, cy, nx, ny);
+        grad.addColorStop(0, "#00d4ff44");
+        grad.addColorStop(1, color + "44");
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    });
+
+    // Draw device nodes
+    others.forEach((d, i) => {
+        const angle = (2 * Math.PI * i) / others.length - Math.PI / 2;
+        const nx = cx + radius * Math.cos(angle);
+        const ny = cy + radius * Math.sin(angle);
+        const score = getRiskScore(d);
+        const color = getRiskColor(score, d);
+        drawNode(nx, ny, d, color, score, 28);
+        nodes.push({ x: nx, y: ny, r: 28, data: d });
+    });
+
+    // Draw router node (center, bigger)
+    drawNode(cx, cy, router, "#00d4ff", 0, 36);
+    nodes.push({ x: cx, y: cy, r: 36, data: router });
+
+    document.getElementById("device-count-badge").textContent = devices.length + " devices";
+}
+
+function drawNode(x, y, d, color, score, r) {
+    // Glow
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, r * 1.8);
+    glow.addColorStop(0, color + "33");
+    glow.addColorStop(1, "transparent");
+    ctx.beginPath(); ctx.arc(x, y, r * 1.8, 0, Math.PI * 2);
+    ctx.fillStyle = glow; ctx.fill();
+
+    // Circle
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = "#0d1117";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.fill(); ctx.stroke();
+
+    // Icon
+    ctx.font = `${r * 0.7}px serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(getDeviceIcon(d), x, y);
+
+    // Label
+    const label = d.hostname && d.hostname !== "unknown" ? d.hostname : d.ip;
+    ctx.font = "11px 'Courier New'";
+    ctx.fillStyle = color;
+    ctx.textBaseline = "top";
+    ctx.fillText(label.length > 14 ? label.slice(0, 13) + "…" : label, x, y + r + 5);
+
+    if (score > 0) {
+        ctx.font = "10px 'Courier New'";
+        ctx.fillStyle = "#8b949e";
+        ctx.fillText("Risk:" + score, x, y + r + 18);
+    }
+}
+
+canvas.addEventListener("mousemove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    let hit = null;
+    for (const n of nodes) {
+        if (Math.hypot(mx - n.x, my - n.y) < n.r + 5) { hit = n; break; }
+    }
+    if (hit) {
+        const d = hit.data;
+        const score = getRiskScore(d);
+        tooltip.style.display = "block";
+        tooltip.style.left = (e.clientX - canvas.getBoundingClientRect().left + 12) + "px";
+        tooltip.style.top = (e.clientY - canvas.getBoundingClientRect().top - 10) + "px";
+        tooltip.innerHTML = `
+            <strong>${d.hostname || d.ip}</strong><br>
+            IP: ${d.ip}<br>
+            MAC: ${d.mac || "—"}<br>
+            OS: ${d.os || "Unknown"}<br>
+            Ports: ${d.ports?.length || 0} open<br>
+            Threats: ${d.threats?.length || 0}<br>
+            Risk Score: ${score}
+        `;
+        canvas.style.cursor = "pointer";
+    } else {
+        tooltip.style.display = "none";
+        canvas.style.cursor = "default";
+    }
+});
+
+canvas.addEventListener("click", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    for (const n of nodes) {
+        if (Math.hypot(mx - n.x, my - n.y) < n.r + 5) {
+            window.location.href = "/device/" + n.data.ip;
+            return;
+        }
+    }
+});
+
+function loadMap() {
+    fetch("/api/scan_results")
+        .then(r => r.json())
+        .then(results => {
+            const devices = results.map(r => r.data).filter(d => d && d.ip);
+            drawMap(devices);
+        });
+}
+
+loadMap();
+window.addEventListener("resize", loadMap);
+</script>
+</body>
+</html>

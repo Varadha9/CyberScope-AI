@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberScope AI — Device Detail</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="sidebar">
+    <div class="sidebar-logo">
+        <div class="logo-text">⬡ CYBERSCOPE</div>
+        <div class="logo-sub">AI NETWORK SCANNER</div>
+    </div>
+    <a href="/" class="nav-item"><span class="nav-icon">🏠</span><span>Dashboard</span></a>
+    <a href="/alerts" class="nav-item"><span class="nav-icon">🔔</span><span>Alerts</span></a>
+    <a href="/map" class="nav-item"><span class="nav-icon">🗺️</span><span>Network Map</span></a>
+    <a href="/reports" class="nav-item"><span class="nav-icon">📄</span><span>Reports</span></a>
+    <div class="sidebar-status"><span class="status-dot"></span><span>MONITORING</span></div>
+</nav>
+
+<div class="main-content">
+    <div class="topbar">
+        <div class="topbar-title">Device Detail</div>
+        <div class="topbar-right">
+            <span class="topbar-time" id="clock"></span>
+        </div>
+    </div>
+    <div class="page">
+        <a href="/" class="back-btn">← Back to Dashboard</a>
+        <div id="detail-content">
+            <div class="empty-state"><div class="empty-icon">⏳</div>Loading device data...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+setInterval(() => { document.getElementById("clock").textContent = new Date().toLocaleTimeString(); }, 1000);
+
+const ip = window.location.pathname.split("/device/")[1];
+
+function getRiskScore(d) {
+    let score = 0;
+    score += (d.threats?.length || 0) * 15;
+    score += (d.vulns?.length || 0) * 20;
+    score += (d.nikto?.length || 0) * 5;
+    score += (d.msf?.length || 0) * 10;
+    score += (d.hydra?.length || 0) * 25;
+    score += (d.sqlmap?.length || 0) * 20;
+    score += (d.wpscan?.length || 0) * 10;
+    return Math.min(score, 100);
+}
+
+function getRiskColor(score) {
+    if (score >= 70) return "var(--critical)";
+    if (score >= 50) return "var(--red)";
+    if (score >= 30) return "var(--yellow)";
+    if (score > 0)   return "var(--cyan)";
+    return "var(--green)";
+}
+
+function getRiskLabel(score) {
+    if (score >= 70) return ["critical", "CRITICAL"];
+    if (score >= 50) return ["high", "HIGH RISK"];
+    if (score >= 30) return ["medium", "MEDIUM"];
+    if (score > 0)   return ["low", "LOW RISK"];
+    return ["safe", "SAFE"];
+}
+
+function getDeviceIcon(d) {
+    const h = (d.hostname || "").toLowerCase();
+    const o = (d.os || "").toLowerCase();
+    if (h.includes("router") || h.includes("fiber") || h.includes("jio")) return "🌐";
+    if (h.includes("phone") || h.includes("android") || h.includes("vivo") || h.includes("redmi") || h.includes("samsung")) return "📱";
+    if (h.includes("desktop") || h.includes("pc") || o.includes("windows")) return "🖥️";
+    if (h.includes("camera") || h.includes("nvr") || h.includes("hik")) return "📷";
+    if (h.includes("laptop")) return "💻";
+    if (o.includes("linux")) return "🐧";
+    return "📡";
+}
+
+function renderFindings(items, cls) {
+    if (!items || !items.length) return '<div class="text-dim" style="font-size:0.78rem;padding:8px 0">No findings</div>';
+    return items.map(i => `<div class="finding-item ${cls}">${i}</div>`).join("");
+}
+
+function renderPorts(ports, services) {
+    if (!ports || !ports.length) return '<span class="text-dim">No open ports</span>';
+    const dangerPorts = [21,22,23,25,445,3389,4444,27017,3306,5432];
+    return ports.map(p => {
+        const svc = services?.[p] || services?.[String(p)] || {};
+        const name = svc.name || svc.product || "";
+        const isDanger = dangerPorts.includes(p);
+        return `<span class="port-tag ${isDanger ? 'danger' : ''}" title="${name}">
+            ${isDanger ? '⚠' : '●'} ${p}${name ? ' <span style="opacity:0.6;font-size:0.7rem">'+name+'</span>' : ''}
+        </span>`;
+    }).join("");
+}
+
+fetch(`/api/scan_results`)
+    .then(r => r.json())
+    .then(results => {
+        const row = results.find(r => r.ip === ip);
+        if (!row) {
+            document.getElementById("detail-content").innerHTML =
+                `<div class="empty-state"><div class="empty-icon">❌</div>No scan data found for ${ip}.<br><a href="/" class="text-cyan">Run a scan first</a></div>`;
+            return;
+        }
+        const d = row.data;
+        const score = getRiskScore(d);
+        const [riskCls, riskLabel] = getRiskLabel(score);
+        const icon = getDeviceIcon(d);
+        const color = getRiskColor(score);
+
+        document.title = `CyberScope AI — ${d.hostname || ip}`;
+
+        document.getElementById("detail-content").innerHTML = `
+        <!-- Hero -->
+        <div class="detail-hero">
+            <div class="detail-device-icon">${icon}</div>
+            <div class="detail-info" style="flex:1">
+                <h1>${d.hostname && d.hostname !== "unknown" ? d.hostname : "Unknown Device"}</h1>
+                <div class="detail-ip">${ip}</div>
+                <div class="detail-meta">
+                    <div class="detail-meta-item">MAC: <span class="mono">${d.mac || "—"}</span></div>
+                    <div class="detail-meta-item">OS: <span>${d.os || "Unknown"}</span></div>
+                    <div class="detail-meta-item">Last Scan: <span>${row.timestamp ? new Date(row.timestamp).toLocaleString() : "—"}</span></div>
+                    <div class="detail-meta-item">Open Ports: <span>${d.ports?.length || 0}</span></div>
+                </div>
+            </div>
+            <div style="text-align:center;min-width:120px">
+                <div style="font-size:2.5rem;font-weight:700;color:${color};font-family:'Courier New',monospace">${score}</div>
+                <div style="font-size:0.7rem;color:var(--text-dim);margin-bottom:8px">RISK SCORE</div>
+                <span class="risk-badge ${riskCls}">${riskLabel}</span>
+            </div>
+        </div>
+
+        <!-- Ports & Services -->
+        <div class="panel section-gap">
+            <div class="panel-header"><div class="panel-title">🔓 Open Ports & Services</div></div>
+            <div class="panel-body">
+                <div style="flex-wrap:wrap;display:flex">${renderPorts(d.ports, d.services)}</div>
+                ${d.services && Object.keys(d.services).length ? `
+                <table style="width:100%;margin-top:16px;border-collapse:collapse;font-size:0.78rem">
+                    <tr style="color:var(--text-dim);font-size:0.7rem">
+                        <th style="padding:6px;text-align:left">PORT</th>
+                        <th style="padding:6px;text-align:left">SERVICE</th>
+                        <th style="padding:6px;text-align:left">PRODUCT</th>
+                        <th style="padding:6px;text-align:left">VERSION</th>
+                    </tr>
+                    ${Object.entries(d.services).map(([port, svc]) => `
+                    <tr style="border-top:1px solid var(--border)">
+                        <td style="padding:6px;font-family:'Courier New',monospace;color:var(--cyan)">${port}</td>
+                        <td style="padding:6px">${svc.name || "—"}</td>
+                        <td style="padding:6px">${svc.product || "—"}</td>
+                        <td style="padding:6px">${svc.version || "—"}</td>
+                    </tr>`).join("")}
+                </table>` : ""}
+            </div>
+        </div>
+
+        <!-- Threats & Vulns -->
+        <div class="detail-grid section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">⚠️ Threats Detected</div><span class="risk-badge ${d.threats?.length ? 'high' : 'safe'}">${d.threats?.length || 0} found</span></div>
+                <div class="panel-body">
+                    ${d.threats?.length ? d.threats.map(t => `
+                    <div class="finding-item ${t.risk?.toLowerCase() === 'critical' ? 'critical' : t.risk?.toLowerCase() === 'high' ? 'high' : 'medium'}">
+                        <strong>Port ${t.port}</strong> — ${t.reason}
+                        <span class="risk-badge ${t.risk?.toLowerCase()}" style="float:right">${t.risk}</span>
+                    </div>`).join("") : '<div class="text-dim" style="font-size:0.78rem">No threats detected ✓</div>'}
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">💀 Vulnerabilities (Nmap)</div><span class="risk-badge ${d.vulns?.length ? 'critical' : 'safe'}">${d.vulns?.length || 0} found</span></div>
+                <div class="panel-body">${renderFindings(d.vulns, "critical")}</div>
+            </div>
+        </div>
+
+        <!-- Web Tools -->
+        <div class="detail-grid section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🕷️ Nikto Web Scan</div><span class="risk-badge ${d.nikto?.length ? 'medium' : 'safe'}">${d.nikto?.length || 0} findings</span></div>
+                <div class="panel-body">${renderFindings(d.nikto, "medium")}</div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🌐 WhatWeb (Tech Stack)</div></div>
+                <div class="panel-body">${renderFindings(d.whatweb, "info")}</div>
+            </div>
+        </div>
+
+        <div class="detail-grid section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🔍 WPScan (WordPress)</div><span class="risk-badge ${d.wpscan?.length ? 'high' : 'safe'}">${d.wpscan?.length || 0} findings</span></div>
+                <div class="panel-body">${renderFindings(d.wpscan, "high")}</div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">💉 SQLMap (SQL Injection)</div><span class="risk-badge ${d.sqlmap?.length ? 'critical' : 'safe'}">${d.sqlmap?.length || 0} findings</span></div>
+                <div class="panel-body">${renderFindings(d.sqlmap, "critical")}</div>
+            </div>
+        </div>
+
+        <div class="detail-grid section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">📁 Gobuster (Hidden Dirs)</div><span class="risk-badge ${d.gobuster?.length ? 'medium' : 'safe'}">${d.gobuster?.length || 0} paths</span></div>
+                <div class="panel-body">${renderFindings(d.gobuster, "medium")}</div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🔒 SSLScan</div><span class="risk-badge ${d.sslscan?.length ? 'medium' : 'safe'}">${d.sslscan?.length || 0} findings</span></div>
+                <div class="panel-body">${renderFindings(d.sslscan, "medium")}</div>
+            </div>
+        </div>
+
+        <!-- Exploitation -->
+        <div class="detail-grid section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🔑 Hydra (Brute Force)</div><span class="risk-badge ${d.hydra?.length ? 'critical' : 'safe'}">${d.hydra?.length || 0} credentials</span></div>
+                <div class="panel-body">${renderFindings(d.hydra, "critical")}</div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🪟 Enum4linux (SMB/Windows)</div><span class="risk-badge ${d.enum4linux?.length ? 'high' : 'safe'}">${d.enum4linux?.length || 0} findings</span></div>
+                <div class="panel-body">${renderFindings(d.enum4linux, "high")}</div>
+            </div>
+        </div>
+
+        <div class="detail-grid section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">💣 Metasploit (MSF)</div><span class="risk-badge ${d.msf?.length ? 'high' : 'safe'}">${d.msf?.length || 0} findings</span></div>
+                <div class="panel-body">${renderFindings(d.msf, "high")}</div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🔎 SearchSploit (CVEs)</div><span class="risk-badge ${d.searchsploit?.length ? 'high' : 'safe'}">${d.searchsploit?.length || 0} exploits</span></div>
+                <div class="panel-body">${renderFindings(d.searchsploit, "high")}</div>
+            </div>
+        </div>
+
+        <!-- Banners & Wfuzz -->
+        <div class="detail-grid section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">📡 Netcat Banners</div></div>
+                <div class="panel-body">
+                    ${d.nc_banners && Object.keys(d.nc_banners).length
+                        ? Object.entries(d.nc_banners).map(([p,b]) => `<div class="finding-item info"><strong>Port ${p}:</strong> ${b}</div>`).join("")
+                        : '<div class="text-dim" style="font-size:0.78rem">No banners captured</div>'}
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🕸️ Wfuzz (Web Fuzzer)</div><span class="risk-badge ${d.wfuzz?.length ? 'medium' : 'safe'}">${d.wfuzz?.length || 0} findings</span></div>
+                <div class="panel-body">${renderFindings(d.wfuzz, "medium")}</div>
+            </div>
+        </div>
+        `;
+    });
+</script>
+</body>
+</html>

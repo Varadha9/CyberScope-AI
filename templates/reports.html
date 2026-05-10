@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberScope AI — Reports</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<nav class="sidebar">
+    <div class="sidebar-logo">
+        <div class="logo-text">⬡ CYBERSCOPE</div>
+        <div class="logo-sub">AI NETWORK SCANNER</div>
+    </div>
+    <a href="/" class="nav-item"><span class="nav-icon">🏠</span><span>Dashboard</span></a>
+    <a href="/alerts" class="nav-item"><span class="nav-icon">🔔</span><span>Alerts</span></a>
+    <a href="/map" class="nav-item"><span class="nav-icon">🗺️</span><span>Network Map</span></a>
+    <a href="/reports" class="nav-item active"><span class="nav-icon">📄</span><span>Reports</span></a>
+    <div class="sidebar-status"><span class="status-dot"></span><span>MONITORING</span></div>
+</nav>
+
+<div class="main-content">
+    <div class="topbar">
+        <div class="topbar-title">📄 Reports & History</div>
+        <div class="topbar-right">
+            <span class="topbar-time" id="clock"></span>
+        </div>
+    </div>
+
+    <div class="page">
+        <!-- Summary Cards -->
+        <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px" id="summary-cards">
+            <div class="stat-card cyan"><div class="stat-icon">🖥️</div><div class="stat-label">Devices</div><div class="stat-value" id="s-devices">—</div></div>
+            <div class="stat-card red"><div class="stat-icon">🔔</div><div class="stat-label">Total Alerts</div><div class="stat-value" id="s-alerts">—</div></div>
+            <div class="stat-card critical"><div class="stat-icon">💀</div><div class="stat-label">Critical</div><div class="stat-value" id="s-critical">—</div></div>
+            <div class="stat-card yellow"><div class="stat-icon">⚠️</div><div class="stat-label">High Risk</div><div class="stat-value" id="s-high">—</div></div>
+        </div>
+
+        <!-- Generate + Download -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">📊 Generate New Report</div>
+            </div>
+            <div class="panel-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                <button class="btn btn-primary" onclick="generateReport()">📄 Generate CSV Report</button>
+                <span class="text-dim" style="font-size:0.78rem" id="gen-status">Click to generate a new report from current scan data</span>
+            </div>
+        </div>
+
+        <!-- Saved Reports -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">📁 Saved Reports</div>
+                <button class="btn btn-sm" onclick="loadReports()">🔄 Refresh</button>
+            </div>
+            <div id="reports-list">
+                <div class="empty-state"><div class="empty-icon">⏳</div>Loading reports...</div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid-2 section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">📈 Devices per Scan</div></div>
+                <div class="panel-body"><canvas id="devChart"></canvas></div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🔴 Alert Severity Breakdown</div></div>
+                <div class="panel-body"><canvas id="sevChart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- Device Risk Table -->
+        <div class="panel section-gap">
+            <div class="panel-header"><div class="panel-title">🖥️ Device Risk Summary</div></div>
+            <div class="panel-body no-pad">
+                <table class="device-table" id="risk-table">
+                    <thead><tr>
+                        <th>Device</th><th>IP</th><th>OS</th><th>Open Ports</th>
+                        <th>Threats</th><th>Vulns</th><th>Risk Score</th>
+                    </tr></thead>
+                    <tbody id="risk-body">
+                        <tr><td colspan="7" class="empty-state">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+setInterval(() => { document.getElementById("clock").textContent = new Date().toLocaleTimeString(); }, 1000);
+
+function getRiskScore(d) {
+    let s = 0;
+    s += (d.threats?.length || 0) * 15;
+    s += (d.vulns?.length || 0) * 20;
+    s += (d.nikto?.length || 0) * 5;
+    s += (d.msf?.length || 0) * 10;
+    s += (d.hydra?.length || 0) * 25;
+    s += (d.sqlmap?.length || 0) * 20;
+    return Math.min(s, 100);
+}
+
+function getRiskClass(score) {
+    if (score >= 70) return "critical";
+    if (score >= 50) return "high";
+    if (score >= 20) return "medium";
+    if (score > 0)   return "low";
+    return "safe";
+}
+
+function loadReports() {
+    fetch("/api/reports_list")
+        .then(r => r.json())
+        .then(files => {
+            const container = document.getElementById("reports-list");
+            if (!files.length) {
+                container.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div>No reports yet — generate one above</div>';
+                return;
+            }
+            container.innerHTML = files.map(f => `
+                <div class="report-item">
+                    <div>
+                        <div class="report-name">📄 ${f.filename}</div>
+                        <div class="report-meta">${new Date(f.modified).toLocaleString()} · ${(f.size / 1024).toFixed(1)} KB</div>
+                    </div>
+                    <a href="/api/download_report/${f.filename}" class="btn btn-sm btn-cyan" download>⬇ Download</a>
+                </div>
+            `).join("");
+        });
+}
+
+function generateReport() {
+    const btn = event.target;
+    btn.disabled = true;
+    document.getElementById("gen-status").textContent = "Generating...";
+    fetch("/api/report")
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById("gen-status").textContent =
+                `✔ Report saved: ${data.report_file} | Devices: ${data.total_devices} | Alerts: ${data.total_alerts}`;
+            btn.disabled = false;
+            loadReports();
+        })
+        .catch(() => { document.getElementById("gen-status").textContent = "Error generating report"; btn.disabled = false; });
+}
+
+// Load summary
+fetch("/api/report").then(r => r.json()).then(data => {
+    document.getElementById("s-devices").textContent  = data.total_devices;
+    document.getElementById("s-alerts").textContent   = data.total_alerts;
+    document.getElementById("s-critical").textContent = data.critical_alerts;
+    document.getElementById("s-high").textContent     = data.high_risk_alerts;
+}).catch(() => {});
+
+// Load device risk table + charts
+fetch("/api/scan_results").then(r => r.json()).then(results => {
+    const devices = results.map(r => r.data).filter(d => d && d.ip);
+    const tbody = document.getElementById("risk-body");
+    if (!devices.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No scan data — run a scan first</td></tr>';
+    } else {
+        tbody.innerHTML = devices.map(d => {
+            const score = getRiskScore(d);
+            const cls = getRiskClass(score);
+            const rowStyle = score >= 70 ? "background:#ff00aa08" : score >= 50 ? "background:#ff444408" : score >= 20 ? "background:#ffd70008" : "";
+            return `<tr style="${rowStyle}">
+                <td>${d.hostname && d.hostname !== "unknown" ? d.hostname : "—"}</td>
+                <td><a href="/device/${d.ip}" class="ip-link">🔗 ${d.ip}</a></td>
+                <td>${d.os || "Unknown"}</td>
+                <td><span class="text-yellow">${d.ports?.length || 0}</span></td>
+                <td>${d.threats?.length ? `<span class="text-red">⚠ ${d.threats.length}</span>` : '<span class="text-dim">0</span>'}</td>
+                <td>${d.vulns?.length ? `<span class="text-critical">💀 ${d.vulns.length}</span>` : '<span class="text-dim">0</span>'}</td>
+                <td>
+                    <div class="risk-score-wrap">
+                        <div class="risk-score-bar"><div class="risk-score-fill" style="width:${score}%;background:${score>=70?'var(--critical)':score>=50?'var(--red)':score>=20?'var(--yellow)':'var(--green)'}"></div></div>
+                        <span class="risk-score-num"><span class="risk-badge ${cls}">${score}</span></span>
+                    </div>
+                </td>
+            </tr>`;
+        }).join("");
+    }
+
+    // Device chart
+    const devCtx = document.getElementById("devChart").getContext("2d");
+    new Chart(devCtx, {
+        type: "bar",
+        data: {
+            labels: devices.map(d => d.ip),
+            datasets: [{
+                label: "Open Ports",
+                data: devices.map(d => d.ports?.length || 0),
+                backgroundColor: "rgba(0,212,255,0.3)",
+                borderColor: "#00d4ff",
+                borderWidth: 1
+            }]
+        },
+        options: { scales: { x: { ticks: { color: "#555", maxRotation: 45 } }, y: { ticks: { color: "#555" }, beginAtZero: true } }, plugins: { legend: { labels: { color: "#c9d1d9" } } } }
+    });
+});
+
+// Severity pie chart
+fetch("/api/alerts").then(r => r.json()).then(alerts => {
+    const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+    alerts.forEach(a => { if (counts[a.severity] !== undefined) counts[a.severity]++; });
+    const sevCtx = document.getElementById("sevChart").getContext("2d");
+    new Chart(sevCtx, {
+        type: "doughnut",
+        data: {
+            labels: ["Critical", "High", "Medium", "Low"],
+            datasets: [{
+                data: [counts.CRITICAL, counts.HIGH, counts.MEDIUM, counts.LOW],
+                backgroundColor: ["#ff00aa44", "#ff444444", "#ffd70044", "#00d4ff44"],
+                borderColor: ["#ff00aa", "#ff4444", "#ffd700", "#00d4ff"],
+                borderWidth: 2
+            }]
+        },
+        options: { plugins: { legend: { labels: { color: "#c9d1d9" } } } }
+    });
+});
+
+loadReports();
+</script>
+</body>
+</html>

@@ -29,6 +29,7 @@ from sniffer.packet_sniffer import start_sniff
 import threading
 import time
 import os
+from datetime import datetime
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "cyberscopeai-secret-key")
@@ -254,6 +255,22 @@ def run_scan():
 def dashboard():
     return render_template("dashboard.html")
 
+@app.route("/device/<ip>")
+def device_detail(ip):
+    return render_template("device.html")
+
+@app.route("/alerts")
+def alerts_page():
+    return render_template("alerts.html")
+
+@app.route("/map")
+def map_page():
+    return render_template("map.html")
+
+@app.route("/reports")
+def reports_page():
+    return render_template("reports.html")
+
 @app.route("/api/clear_db", methods=["POST"])
 def api_clear_db():
     clear_db()
@@ -322,6 +339,29 @@ def api_report():
     summary = generate_summary()
     summary["report_file"] = path
     return jsonify(summary)
+
+@app.route("/api/reports_list")
+def api_reports_list():
+    import glob
+    files = sorted(glob.glob("logs/report_*.csv"), reverse=True)
+    result = []
+    for f in files:
+        stat = os.stat(f)
+        result.append({
+            "filename": os.path.basename(f),
+            "path": f,
+            "size": stat.st_size,
+            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
+        })
+    return jsonify(result)
+
+@app.route("/api/download_report/<filename>")
+def api_download_report(filename):
+    from flask import send_file
+    path = os.path.join("logs", filename)
+    if not os.path.exists(path) or not filename.startswith("report_"):
+        return jsonify({"error": "not found"}), 404
+    return send_file(path, as_attachment=True)
 
 def background_scan():
     time.sleep(15)  # Wait for app to fully start

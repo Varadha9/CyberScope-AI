@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberScope AI — Alerts</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+</head>
+<body>
+<nav class="sidebar">
+    <div class="sidebar-logo">
+        <div class="logo-text">⬡ CYBERSCOPE</div>
+        <div class="logo-sub">AI NETWORK SCANNER</div>
+    </div>
+    <a href="/" class="nav-item"><span class="nav-icon">🏠</span><span>Dashboard</span></a>
+    <a href="/alerts" class="nav-item active"><span class="nav-icon">🔔</span><span>Alerts</span></a>
+    <a href="/map" class="nav-item"><span class="nav-icon">🗺️</span><span>Network Map</span></a>
+    <a href="/reports" class="nav-item"><span class="nav-icon">📄</span><span>Reports</span></a>
+    <div class="sidebar-status"><span class="status-dot"></span><span>MONITORING</span></div>
+</nav>
+
+<div class="main-content">
+    <div class="topbar">
+        <div class="topbar-title">🔔 Threat Alerts</div>
+        <div class="topbar-right">
+            <span class="topbar-badge" id="alert-count-badge">Loading...</span>
+            <span class="topbar-time" id="clock"></span>
+        </div>
+    </div>
+
+    <div class="page">
+        <!-- Stats Row -->
+        <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+            <div class="stat-card critical"><div class="stat-icon">💀</div><div class="stat-label">Critical</div><div class="stat-value" id="cnt-critical">0</div></div>
+            <div class="stat-card red"><div class="stat-icon">🔴</div><div class="stat-label">High</div><div class="stat-value" id="cnt-high">0</div></div>
+            <div class="stat-card yellow"><div class="stat-icon">🟡</div><div class="stat-label">Medium</div><div class="stat-value" id="cnt-medium">0</div></div>
+            <div class="stat-card cyan"><div class="stat-icon">🔵</div><div class="stat-label">Low</div><div class="stat-value" id="cnt-low">0</div></div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title"><span class="dot-indicator"></span> All Alerts</div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <input type="text" id="search-input" placeholder="🔍 Search alerts..." class="search-input" oninput="applyFilters()">
+                    <button class="filter-btn active" data-sev="ALL" onclick="setSevFilter(this)">ALL</button>
+                    <button class="filter-btn critical" data-sev="CRITICAL" onclick="setSevFilter(this)">CRITICAL</button>
+                    <button class="filter-btn high" data-sev="HIGH" onclick="setSevFilter(this)">HIGH</button>
+                    <button class="filter-btn medium" data-sev="MEDIUM" onclick="setSevFilter(this)">MEDIUM</button>
+                    <button class="filter-btn low" data-sev="LOW" onclick="setSevFilter(this)">LOW</button>
+                    <button class="btn btn-sm btn-cyan" onclick="exportCSV()">⬇ Export CSV</button>
+                    <button class="btn btn-sm btn-danger" onclick="clearAllAlerts()">🗑 Clear All</button>
+                </div>
+            </div>
+            <div class="panel-body no-pad" id="alerts-container">
+                <div class="empty-state"><div class="empty-icon">⏳</div>Loading alerts...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+setInterval(() => { document.getElementById("clock").textContent = new Date().toLocaleTimeString(); }, 1000);
+
+const socket = io();
+socket.on("alert", (data) => {
+    allAlerts.unshift({ alert: data.message, severity: data.severity, timestamp: new Date().toISOString() });
+    renderAlerts();
+});
+
+let allAlerts = [];
+let currentSev = "ALL";
+let dismissedIds = new Set();
+
+function setSevFilter(btn) {
+    document.querySelectorAll(".filter-btn[data-sev]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentSev = btn.dataset.sev;
+    applyFilters();
+}
+
+function applyFilters() {
+    const q = document.getElementById("search-input").value.toLowerCase();
+    const filtered = allAlerts.filter((a, i) => {
+        if (dismissedIds.has(i)) return false;
+        if (currentSev !== "ALL" && a.severity !== currentSev) return false;
+        if (q && !a.alert.toLowerCase().includes(q) && !a.severity.toLowerCase().includes(q)) return false;
+        return true;
+    });
+    renderFiltered(filtered);
+}
+
+function renderAlerts() {
+    updateCounts();
+    applyFilters();
+}
+
+function updateCounts() {
+    document.getElementById("cnt-critical").textContent = allAlerts.filter(a => a.severity === "CRITICAL").length;
+    document.getElementById("cnt-high").textContent     = allAlerts.filter(a => a.severity === "HIGH").length;
+    document.getElementById("cnt-medium").textContent   = allAlerts.filter(a => a.severity === "MEDIUM").length;
+    document.getElementById("cnt-low").textContent      = allAlerts.filter(a => a.severity === "LOW").length;
+    document.getElementById("alert-count-badge").textContent = allAlerts.length + " total alerts";
+}
+
+function renderFiltered(list) {
+    const container = document.getElementById("alerts-container");
+    if (!list.length) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🛡️</div>No alerts match your filter</div>';
+        return;
+    }
+
+    // Group by device IP
+    const groups = {};
+    list.forEach((a, idx) => {
+        const ipMatch = a.alert.match(/\b(\d{1,3}(?:\.\d{1,3}){3})\b/);
+        const key = ipMatch ? ipMatch[1] : "General";
+        if (!groups[key]) groups[key] = [];
+        groups[key].push({ ...a, _idx: idx });
+    });
+
+    container.innerHTML = Object.entries(groups).map(([device, alerts]) => `
+        <div class="alert-group">
+            <div class="alert-group-header">
+                <span class="alert-group-device">📡 ${device}</span>
+                <span class="text-dim" style="font-size:0.72rem">${alerts.length} alert(s)</span>
+            </div>
+            ${alerts.map(a => `
+            <div class="alert-item" id="alert-row-${a._idx}">
+                <span class="alert-sev ${a.severity}">${a.severity}</span>
+                <span class="alert-msg">${a.alert}</span>
+                <span class="alert-time">${a.timestamp ? new Date(a.timestamp).toLocaleString() : ""}</span>
+                <button class="dismiss-btn" onclick="dismissAlert(${a._idx})" title="Dismiss">✕</button>
+            </div>`).join("")}
+        </div>
+    `).join("");
+}
+
+function dismissAlert(idx) {
+    dismissedIds.add(idx);
+    const row = document.getElementById("alert-row-" + idx);
+    if (row) { row.style.opacity = "0"; setTimeout(() => applyFilters(), 300); }
+}
+
+function clearAllAlerts() {
+    if (!confirm("Clear all alerts from view? (Does not delete from DB)")) return;
+    dismissedIds = new Set(allAlerts.map((_, i) => i));
+    applyFilters();
+}
+
+function exportCSV() {
+    const rows = [["Severity","Alert","Timestamp"]];
+    allAlerts.forEach(a => rows.push([a.severity, a.alert, a.timestamp || ""]));
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "cyberscope_alerts.csv"; a.click();
+}
+
+fetch("/api/alerts")
+    .then(r => r.json())
+    .then(data => {
+        allAlerts = data;
+        renderAlerts();
+    });
+</script>
+</body>
+</html>

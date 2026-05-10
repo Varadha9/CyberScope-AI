@@ -1,59 +1,89 @@
 const socket = io();
 
 socket.on("connect", () => {
-    console.log("✓ WebSocket connected");
     log("WebSocket connected to server", "success");
 });
-
 socket.on("disconnect", () => {
-    console.log("✗ WebSocket disconnected");
     log("WebSocket disconnected", "error");
 });
 
-function log(msg, type="info") {
+// ── Clock ──
+setInterval(() => {
+    const el = document.getElementById("clock");
+    if (el) el.textContent = new Date().toLocaleTimeString();
+}, 1000);
+
+// ── Logging ──
+let logFilter = "ALL";
+let autoScroll = true;
+const logLines = [];
+
+function log(msg, type = "info") {
     const feed = document.getElementById("terminal-log");
-    const div = document.createElement("div");
-    div.className = "log-line " + type;
-    div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-    feed.prepend(div);
-    // Keep max 200 lines
-    while (feed.children.length > 200) feed.removeChild(feed.lastChild);
+    if (!feed) return;
+    logLines.unshift({ msg, type, time: new Date().toLocaleTimeString() });
+    if (logLines.length > 300) logLines.pop();
+    renderLog();
+}
+
+function renderLog() {
+    const feed = document.getElementById("terminal-log");
+    if (!feed) return;
+    const filtered = logFilter === "ALL" ? logLines : logLines.filter(l => {
+        if (logFilter === "ERRORS")  return l.type === "error";
+        if (logFilter === "TOOLS")   return l.type === "tool";
+        if (logFilter === "SUCCESS") return l.type === "success";
+        return true;
+    });
+    feed.innerHTML = filtered.slice(0, 200).map(l =>
+        `<div class="log-line ${l.type}">[${l.time}] ${l.msg}</div>`
+    ).join("");
+    if (autoScroll) feed.scrollTop = 0;
 }
 
 function clearLog() {
-    document.getElementById("terminal-log").innerHTML = "";
+    logLines.length = 0;
+    renderLog();
 }
 
-socket.on("log", (data) => {
-    log(data.msg, data.type || "info");
-});
+function setLogFilter(btn, filter) {
+    logFilter = filter;
+    document.querySelectorAll(".log-filter-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    renderLog();
+}
 
-setInterval(() => {
-    document.getElementById("clock").textContent = new Date().toLocaleTimeString();
-}, 1000);
+function toggleAutoScroll(btn) {
+    autoScroll = !autoScroll;
+    btn.textContent = autoScroll ? "⏬ Auto" : "⏸ Manual";
+    btn.classList.toggle("btn-cyan", autoScroll);
+}
 
-const deviceCtx = document.getElementById("deviceChart").getContext("2d");
-const threatCtx  = document.getElementById("threatChart").getContext("2d");
+socket.on("log", (data) => log(data.msg, data.type || "info"));
 
-const chartDefaults = {
-    borderColor: "#00ff00",
-    backgroundColor: "rgba(0,255,0,0.1)",
-    tension: 0.4, fill: true,
-};
+// ── Charts ──
+let deviceChart, threatChart;
 
-const deviceChart = new Chart(deviceCtx, {
-    type: "line",
-    data: { labels: [], datasets: [{ label: "Active Devices", data: [], ...chartDefaults }] },
-    options: { scales: { x: { ticks: { color: "#555" } }, y: { ticks: { color: "#555" }, beginAtZero: true } }, plugins: { legend: { labels: { color: "#00ff00" } } } }
-});
+function initCharts() {
+    const deviceCtx = document.getElementById("deviceChart");
+    const threatCtx  = document.getElementById("threatChart");
+    if (!deviceCtx || !threatCtx) return;
 
-const threatChart = new Chart(threatCtx, {
-    type: "bar",
-    data: { labels: [], datasets: [{ label: "Threats", data: [], borderColor: "#ff4444", backgroundColor: "rgba(255,68,68,0.2)" }] },
-    options: { scales: { x: { ticks: { color: "#555" } }, y: { ticks: { color: "#555" }, beginAtZero: true } }, plugins: { legend: { labels: { color: "#ff4444" } } } }
-});
+    deviceChart = new Chart(deviceCtx.getContext("2d"), {
+        type: "line",
+        data: { labels: [], datasets: [{ label: "Active Devices", data: [], borderColor: "#00ff88", backgroundColor: "rgba(0,255,136,0.1)", tension: 0.4, fill: true }] },
+        options: { scales: { x: { ticks: { color: "#555" } }, y: { ticks: { color: "#555" }, beginAtZero: true } }, plugins: { legend: { labels: { color: "#00ff88" } } } }
+    });
+
+    threatChart = new Chart(threatCtx.getContext("2d"), {
+        type: "bar",
+        data: { labels: [], datasets: [{ label: "Threats", data: [], borderColor: "#ff4444", backgroundColor: "rgba(255,68,68,0.2)" }] },
+        options: { scales: { x: { ticks: { color: "#555" } }, y: { ticks: { color: "#555" }, beginAtZero: true } }, plugins: { legend: { labels: { color: "#ff4444" } } } }
+    });
+}
 
 function pushChart(chart, label, value) {
+    if (!chart) return;
     if (chart.data.labels.length > 10) {
         chart.data.labels.shift();
         chart.data.datasets[0].data.shift();
@@ -63,63 +93,275 @@ function pushChart(chart, label, value) {
     chart.update();
 }
 
-// Severity color map
-const sevColor = { CRITICAL: "critical", HIGH: "red", MEDIUM: "yellow", LOW: "green", SAFE: "green" };
+// ── Risk Scoring ──
+function getRiskScore(d) {
+    let s = 0;
+    s += (d.threats?.length || 0) * 15;
+    s += (d.vulns?.length || 0) * 20;
+    s += (d.nikto?.length || 0) * 5;
+    s += (d.msf?.length || 0) * 10;
+    s += (d.hydra?.length || 0) * 25;
+    s += (d.sqlmap?.length || 0) * 20;
+    s += (d.wpscan?.length || 0) * 10;
+    return Math.min(s, 100);
+}
 
+function getRiskClass(score) {
+    if (score >= 70) return "critical";
+    if (score >= 50) return "high";
+    if (score >= 20) return "medium";
+    if (score > 0)   return "low";
+    return "safe";
+}
+
+function getRiskColor(score) {
+    if (score >= 70) return "var(--critical)";
+    if (score >= 50) return "var(--red)";
+    if (score >= 20) return "var(--yellow)";
+    if (score > 0)   return "var(--cyan)";
+    return "var(--green)";
+}
+
+function getDeviceIcon(d) {
+    const h = (d.hostname || "").toLowerCase();
+    const o = (d.os || "").toLowerCase();
+    if (h.includes("router") || h.includes("fiber") || h.includes("jio") || h.includes("gateway")) return "🌐";
+    if (h.includes("phone") || h.includes("android") || h.includes("vivo") || h.includes("redmi") || h.includes("samsung")) return "📱";
+    if (h.includes("camera") || h.includes("nvr") || h.includes("hik")) return "📷";
+    if (h.includes("laptop")) return "💻";
+    if (o.includes("windows") || h.includes("desktop") || h.includes("pc")) return "🖥️";
+    if (o.includes("linux")) return "🐧";
+    return "📡";
+}
+
+// ── Scan Progress ──
+let scanTotal = 0;
+let scanDone  = 0;
+let scanRunning = false;
+
+function setScanRunning(running, total) {
+    scanRunning = running;
+    scanTotal = total || 0;
+    scanDone  = 0;
+    const bar = document.getElementById("scan-progress-bar");
+    const label = document.getElementById("scan-progress-label");
+    const btns = document.querySelectorAll(".scan-btn");
+    if (running) {
+        if (bar) bar.style.display = "block";
+        btns.forEach(b => b.disabled = true);
+        updateScanProgress();
+    } else {
+        if (bar) bar.style.display = "none";
+        if (label) label.textContent = "";
+        btns.forEach(b => b.disabled = false);
+    }
+}
+
+function updateScanProgress() {
+    const label = document.getElementById("scan-progress-label");
+    const fill  = document.getElementById("scan-progress-fill");
+    if (!label || !fill) return;
+    const pct = scanTotal > 0 ? Math.round((scanDone / scanTotal) * 100) : 0;
+    label.textContent = `Scanning ${scanDone}/${scanTotal} devices...`;
+    fill.style.width = pct + "%";
+}
+
+// ── Device Table ──
+function buildToolBadges(d) {
+    const badges = [
+        d.wpscan?.length    ? `<span class="tool-badge warn" title="WPScan">WP:${d.wpscan.length}</span>` : "",
+        d.sqlmap?.length    ? `<span class="tool-badge vuln" title="SQLMap">SQL:${d.sqlmap.length}</span>` : "",
+        d.hydra?.length     ? `<span class="tool-badge vuln" title="Hydra">HYD:${d.hydra.length}</span>` : "",
+        d.gobuster?.length  ? `<span class="tool-badge warn" title="Gobuster">DIR:${d.gobuster.length}</span>` : "",
+        d.sslscan?.length   ? `<span class="tool-badge warn" title="SSLScan">SSL:${d.sslscan.length}</span>` : "",
+        d.searchsploit?.length ? `<span class="tool-badge vuln" title="SearchSploit">CVE:${d.searchsploit.length}</span>` : "",
+        d.enum4linux?.length   ? `<span class="tool-badge warn" title="Enum4linux">SMB:${d.enum4linux.length}</span>` : "",
+        d.nikto?.length     ? `<span class="tool-badge warn" title="Nikto">NK:${d.nikto.length}</span>` : "",
+        d.msf?.length       ? `<span class="tool-badge vuln" title="Metasploit">MSF:${d.msf.length}</span>` : "",
+    ].filter(Boolean);
+    return badges.length ? `<div class="tool-badges">${badges.join("")}</div>` : `<span class="text-dim">—</span>`;
+}
+
+function buildExpandedRow(d, colSpan) {
+    const score = getRiskScore(d);
+    const services = d.services || {};
+    const portRows = (d.ports || []).map(p => {
+        const svc = services[p] || services[String(p)] || {};
+        const danger = [21,22,23,25,445,3389,4444,27017,3306,5432].includes(p);
+        return `<span class="port-tag ${danger ? 'danger' : ''}">${danger ? '⚠' : '●'} ${p}${svc.name ? ' <small style="opacity:0.6">' + svc.name + '</small>' : ''}</span>`;
+    }).join("");
+
+    const sections = [
+        { label: "💀 Vulns",      items: d.vulns,        cls: "critical" },
+        { label: "🕷️ Nikto",      items: d.nikto,        cls: "medium"   },
+        { label: "💣 MSF",        items: d.msf,          cls: "high"     },
+        { label: "🔑 Hydra",      items: d.hydra,        cls: "critical" },
+        { label: "💉 SQLMap",     items: d.sqlmap,       cls: "critical" },
+        { label: "🔎 CVEs",       items: d.searchsploit, cls: "high"     },
+        { label: "🔍 WPScan",     items: d.wpscan,       cls: "high"     },
+        { label: "📁 Gobuster",   items: d.gobuster,     cls: "medium"   },
+        { label: "🌐 WhatWeb",    items: d.whatweb,      cls: "info"     },
+    ].filter(s => s.items?.length);
+
+    return `<tr class="expanded-row">
+        <td colspan="${colSpan}" style="padding:0">
+            <div class="expanded-content">
+                <div style="margin-bottom:12px">
+                    <div class="text-dim" style="font-size:0.7rem;margin-bottom:6px">OPEN PORTS</div>
+                    <div style="display:flex;flex-wrap:wrap">${portRows || '<span class="text-dim">No open ports</span>'}</div>
+                </div>
+                ${sections.length ? `<div class="expanded-findings">
+                    ${sections.map(s => `
+                    <div class="expanded-section">
+                        <div class="expanded-section-title">${s.label} <span class="risk-badge ${s.cls}">${s.items.length}</span></div>
+                        ${s.items.slice(0, 5).map(i => `<div class="finding-item ${s.cls}">${i}</div>`).join("")}
+                        ${s.items.length > 5 ? `<div class="text-dim" style="font-size:0.72rem;padding:4px 0">+${s.items.length - 5} more — <a href="/device/${d.ip}" class="text-cyan">view all</a></div>` : ""}
+                    </div>`).join("")}
+                </div>` : '<div class="text-dim" style="font-size:0.78rem">No tool findings yet — deep scan may still be running</div>'}
+                <div style="margin-top:12px">
+                    <a href="/device/${d.ip}" class="btn btn-sm btn-cyan">🔍 Full Device Report →</a>
+                </div>
+            </div>
+        </td>
+    </tr>`;
+}
+
+function updateDeviceTable(devices) {
+    const tbody = document.getElementById("device-body");
+    if (!tbody) return;
+    if (!devices || !devices.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No devices found — click ▶ Full Scan to start</td></tr>';
+        return;
+    }
+
+    const unique = [];
+    const seen = new Set();
+    for (let i = devices.length - 1; i >= 0; i--) {
+        if (!seen.has(devices[i].ip)) { unique.unshift(devices[i]); seen.add(devices[i].ip); }
+    }
+
+    const label = document.getElementById("device-count-label");
+    if (label) label.textContent = unique.length + " device(s)";
+
+    tbody.innerHTML = unique.map(d => {
+        const score = getRiskScore(d);
+        const cls   = getRiskClass(score);
+        const color = getRiskColor(score);
+        const icon  = getDeviceIcon(d);
+        const rowBg = score >= 70 ? "background:#ff00aa08" : score >= 50 ? "background:#ff444408" : score >= 20 ? "background:#ffd70008" : "";
+        return `<tr class="device-row" style="${rowBg}" onclick="toggleExpand(this, '${d.ip}')" data-ip="${d.ip}">
+            <td>
+                <a href="/device/${d.ip}" class="ip-link" onclick="event.stopPropagation()">
+                    <span class="device-icon">${icon}</span>${d.ip}
+                </a>
+                <div class="hostname-text">${d.hostname && d.hostname !== "unknown" ? d.hostname : ""}</div>
+            </td>
+            <td class="mac-text">${d.mac || "—"}</td>
+            <td>${d.os || <span class="text-dim">?</span>}</td>
+            <td>
+                <div class="risk-score-wrap">
+                    <div class="risk-score-bar"><div class="risk-score-fill" style="width:${score}%;background:${color}"></div></div>
+                    <span class="risk-score-num"><span class="risk-badge ${cls}">${score}</span></span>
+                </div>
+            </td>
+            <td>${d.threats?.length ? `<span class="risk-badge high">⚠ ${d.threats.length}</span>` : '<span class="risk-badge safe">✓ SAFE</span>'}</td>
+            <td>${d.vulns?.length ? `<span class="risk-badge critical">💀 ${d.vulns.length}</span>` : '<span class="text-dim">—</span>'}</td>
+            <td>${buildToolBadges(d)}</td>
+            <td style="color:var(--text-dim);font-size:0.72rem">${d.comment ? d.comment.slice(0, 50) + (d.comment.length > 50 ? "…" : "") : "—"}</td>
+        </tr>`;
+    }).join("");
+}
+
+function toggleExpand(row, ip) {
+    const next = row.nextElementSibling;
+    if (next && next.classList.contains("expanded-row")) {
+        next.remove();
+        row.classList.remove("expanded");
+        return;
+    }
+    // Close any other open expanded rows
+    document.querySelectorAll(".expanded-row").forEach(r => r.remove());
+    document.querySelectorAll(".device-row.expanded").forEach(r => r.classList.remove("expanded"));
+
+    fetch("/api/scan_results")
+        .then(r => r.json())
+        .then(results => {
+            const found = results.find(r => r.ip === ip);
+            if (!found) return;
+            const d = found.data;
+            const colSpan = row.cells.length;
+            row.insertAdjacentHTML("afterend", buildExpandedRow(d, colSpan));
+            row.classList.add("expanded");
+        });
+}
+
+// ── Alerts ──
+function addAlert(message, severity) {
+    const feed = document.getElementById("alert-feed");
+    if (!feed) return;
+    const empty = feed.querySelector(".empty-state");
+    if (empty) empty.remove();
+    const div = document.createElement("div");
+    div.className = "alert-item";
+    const sevCls = severity === "CRITICAL" ? "CRITICAL" : severity === "HIGH" ? "HIGH" : severity === "MEDIUM" ? "MEDIUM" : "LOW";
+    div.innerHTML = `
+        <span class="alert-sev ${sevCls}">${severity}</span>
+        <span class="alert-msg">${message}</span>
+        <span class="alert-time">${new Date().toLocaleTimeString()}</span>
+    `;
+    feed.prepend(div);
+    while (feed.children.length > 50) feed.removeChild(feed.lastChild);
+}
+
+// ── Socket Events ──
 socket.on("scan_complete", (data) => {
     hideSpinner();
-    document.getElementById("status-text").textContent = "MONITORING ACTIVE";
+    setScanRunning(false);
     const devices = data.devices || [];
-    if (data.subnet) document.getElementById("subnet-badge").textContent = "WiFi: " + data.subnet;
+    const statusEl = document.getElementById("status-text");
+    if (statusEl) statusEl.textContent = "MONITORING ACTIVE";
+    if (data.subnet) {
+        const badge = document.getElementById("subnet-badge");
+        if (badge) badge.textContent = "WiFi: " + data.subnet;
+    }
     updateDeviceTable(devices);
     const now = new Date().toLocaleTimeString();
-    pushChart(deviceChart, now, devices.length);
     const threatCount = devices.reduce((s, d) => s + (d.threats?.length || 0), 0);
     const vulnCount   = devices.reduce((s, d) => s + (d.vulns?.length  || 0), 0);
+    pushChart(deviceChart, now, devices.length);
     pushChart(threatChart, now, threatCount);
-    document.getElementById("total-devices").textContent  = devices.length;
-    document.getElementById("total-threats").textContent  = threatCount;
-    document.getElementById("total-vulns").textContent    = vulnCount;
-    const totalPorts = devices.reduce((s, d) => s + (d.ports?.length || 0), 0);
-    document.getElementById("total-ports").textContent = totalPorts;
+    setStatValue("total-devices", devices.length);
+    setStatValue("total-threats", threatCount);
+    setStatValue("total-vulns",   vulnCount);
+    setStatValue("total-ports",   devices.reduce((s, d) => s + (d.ports?.length || 0), 0));
     if (devices.length > 0 && devices[0].comment) {
-        document.getElementById("ai-comment").textContent = "🤖 AI: " + devices[0].comment;
+        const ai = document.getElementById("ai-comment");
+        if (ai) ai.textContent = "🤖 AI: " + devices[0].comment;
     }
+    log(`✔ Scan complete — ${devices.length} device(s) found`, "success");
 });
 
 socket.on("device_update", (data) => {
-    const tbody = document.getElementById("device-body");
-    const rows = tbody.querySelectorAll("tr");
-    rows.forEach(row => {
-        if (row.cells[0] && row.cells[0].textContent === data.ip) {
-            const d = data.data;
-            const ports = (Array.isArray(d.ports) && d.ports.length)
-                ? d.ports.slice(0, 8).join(", ") + (d.ports.length > 8 ? "..." : "")
-                : "—";
-            const threatBadge = d.threats?.length
-                ? `<span class="red">⚠ ${d.threats.length} THREAT(S)</span>`
-                : `<span class="green">✓ SAFE</span>`;
-            const vulnBadge = d.vulns?.length
-                ? `<span class="critical">💀 ${d.vulns.length} VULN(S)</span>`
-                : `<span class="green">—</span>`;
-            const toolBadges = [
-                d.wpscan?.length   ? `<span class="yellow">WP:${d.wpscan.length}</span>` : "",
-                d.sqlmap?.length   ? `<span class="red">SQL:${d.sqlmap.length}</span>` : "",
-                d.hydra?.length    ? `<span class="critical">HYD:${d.hydra.length}</span>` : "",
-                d.gobuster?.length ? `<span class="yellow">DIR:${d.gobuster.length}</span>` : "",
-                d.sslscan?.length  ? `<span class="yellow">SSL:${d.sslscan.length}</span>` : "",
-                d.searchsploit?.length ? `<span class="red">CVE:${d.searchsploit.length}</span>` : "",
-                d.enum4linux?.length   ? `<span class="yellow">SMB:${d.enum4linux.length}</span>` : "",
-            ].filter(Boolean).join(" ") || "<span class='green'>—</span>";
-            row.cells[1].textContent = d.hostname || "unknown";
-            row.cells[3].textContent = d.os || "?";
-            row.cells[4].innerHTML   = `<span class="yellow">${ports}</span>`;
-            row.cells[5].innerHTML   = threatBadge;
-            row.cells[6].innerHTML   = vulnBadge;
-            row.cells[7].innerHTML   = toolBadges;
-            row.cells[8].textContent = d.comment || "—";
-        }
-    });
+    scanDone++;
+    updateScanProgress();
+    const ip = data.ip;
+    const d  = data.data;
+    // Update existing row if visible
+    const row = document.querySelector(`.device-row[data-ip="${ip}"]`);
+    if (row) {
+        const score = getRiskScore(d);
+        const cls   = getRiskClass(score);
+        const color = getRiskColor(score);
+        const rowBg = score >= 70 ? "background:#ff00aa08" : score >= 50 ? "background:#ff444408" : score >= 20 ? "background:#ffd70008" : "";
+        row.style.cssText = rowBg;
+        row.cells[2].textContent = d.os || "?";
+        row.cells[3].innerHTML = `<div class="risk-score-wrap"><div class="risk-score-bar"><div class="risk-score-fill" style="width:${score}%;background:${color}"></div></div><span class="risk-score-num"><span class="risk-badge ${cls}">${score}</span></span></div>`;
+        row.cells[4].innerHTML = d.threats?.length ? `<span class="risk-badge high">⚠ ${d.threats.length}</span>` : '<span class="risk-badge safe">✓ SAFE</span>';
+        row.cells[5].innerHTML = d.vulns?.length ? `<span class="risk-badge critical">💀 ${d.vulns.length}</span>` : '<span class="text-dim">—</span>';
+        row.cells[6].innerHTML = buildToolBadges(d);
+        row.cells[7].textContent = d.comment ? d.comment.slice(0, 50) + (d.comment.length > 50 ? "…" : "") : "—";
+    }
+    log(`[${ip}] Deep scan updated`, "success");
 });
 
 socket.on("device_found", (data) => {
@@ -128,103 +370,58 @@ socket.on("device_found", (data) => {
 
 socket.on("alert", (data) => {
     addAlert(data.message, data.severity);
-    const cur = parseInt(document.getElementById("total-alerts").textContent) || 0;
-    document.getElementById("total-alerts").textContent = cur + 1;
+    const cur = parseInt(document.getElementById("total-alerts")?.textContent) || 0;
+    setStatValue("total-alerts", cur + 1);
 });
 
-function updateDeviceTable(devices) {
-    const tbody = document.getElementById("device-body");
-    if (!devices || !devices.length) {
-        tbody.innerHTML = '<tr><td colspan="9" class="empty">No devices found on WiFi</td></tr>';
-        return;
-    }
-    const uniqueDevices = [];
-    const seenIPs = new Set();
-    for (let i = devices.length - 1; i >= 0; i--) {
-        if (!seenIPs.has(devices[i].ip)) {
-            uniqueDevices.unshift(devices[i]);
-            seenIPs.add(devices[i].ip);
-        }
-    }
-    tbody.innerHTML = uniqueDevices.map(d => {
-        const threatBadge = d.threats?.length
-            ? `<span class="red">⚠ ${d.threats.length} THREAT(S)</span>`
-            : `<span class="green">✓ SAFE</span>`;
-        const vulnBadge = d.vulns?.length
-            ? `<span class="critical">💀 ${d.vulns.length} VULN(S)</span>`
-            : `<span class="green">—</span>`;
-        const ports = (Array.isArray(d.ports) && d.ports.length)
-            ? d.ports.slice(0, 8).join(", ") + (d.ports.length > 8 ? "..." : "")
-            : "—";
-        const toolBadges = [
-            d.wpscan?.length   ? `<span class="yellow">WP:${d.wpscan.length}</span>` : "",
-            d.sqlmap?.length   ? `<span class="red">SQL:${d.sqlmap.length}</span>` : "",
-            d.hydra?.length    ? `<span class="critical">HYD:${d.hydra.length}</span>` : "",
-            d.gobuster?.length ? `<span class="yellow">DIR:${d.gobuster.length}</span>` : "",
-            d.sslscan?.length  ? `<span class="yellow">SSL:${d.sslscan.length}</span>` : "",
-            d.searchsploit?.length ? `<span class="red">CVE:${d.searchsploit.length}</span>` : "",
-            d.enum4linux?.length   ? `<span class="yellow">SMB:${d.enum4linux.length}</span>` : "",
-        ].filter(Boolean).join(" ") || "<span class='green'>—</span>";
-        return `<tr>
-            <td>${d.ip}</td>
-            <td>${d.hostname || "unknown"}</td>
-            <td>${d.mac}</td>
-            <td>${d.os || "?"}</td>
-            <td class="yellow">${ports}</td>
-            <td>${threatBadge}</td>
-            <td>${vulnBadge}</td>
-            <td>${toolBadges}</td>
-            <td>${d.comment || "—"}</td>
-        </tr>`;
-    }).join("");
-}
-
-function addAlert(message, severity) {
-    const feed = document.getElementById("alert-feed");
-    const empty = feed.querySelector(".empty");
-    if (empty) empty.remove();
-    const div = document.createElement("div");
-    const cls = severity === "CRITICAL" ? "critical" : severity === "HIGH" ? "" : "safe";
-    div.className = "alert-item " + cls;
-    div.textContent = `[${new Date().toLocaleTimeString()}] [${severity}] ${message}`;
-    feed.prepend(div);
+// ── Helpers ──
+function setStatValue(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
 }
 
 function showSpinner(text) {
-    document.getElementById("scan-overlay-text").textContent = text || "SCANNING NETWORK...";
-    document.getElementById("scan-overlay").classList.add("active");
+    const overlay = document.getElementById("scan-overlay");
+    const overlayText = document.getElementById("scan-overlay-text");
+    if (overlay) overlay.classList.add("active");
+    if (overlayText) overlayText.textContent = text || "SCANNING NETWORK...";
 }
 function hideSpinner() {
-    document.getElementById("scan-overlay").classList.remove("active");
+    const overlay = document.getElementById("scan-overlay");
+    if (overlay) overlay.classList.remove("active");
 }
 
+function scrollToDevices() {
+    document.getElementById("devices-section")?.scrollIntoView({ behavior: "smooth" });
+}
+
+// ── Scan Actions ──
 function triggerScan() {
     log("▶ FULL SCAN triggered by user", "info");
-    document.getElementById("ai-comment").textContent = "🤖 AI: Scanning WiFi network with Nmap + Nikto + Metasploit... 🔍";
-    document.getElementById("status-text").textContent = "SCANNING...";
+    const ai = document.getElementById("ai-comment");
+    if (ai) ai.textContent = "🤖 AI: Scanning WiFi network with Nmap + Nikto + Metasploit... 🔍";
+    const statusEl = document.getElementById("status-text");
+    if (statusEl) statusEl.textContent = "SCANNING...";
     showSpinner("SCANNING NETWORK...");
+    setScanRunning(true, 0);
     fetch("/api/scan")
         .then(r => r.json())
         .then(() => {
             hideSpinner();
-            document.getElementById("status-text").textContent = "MONITORING ACTIVE";
             log("✔ Scan started — results will appear via live updates...", "success");
         })
         .catch(err => {
             hideSpinner();
-            document.getElementById("status-text").textContent = "MONITORING ACTIVE";
+            setScanRunning(false);
             log(`Scan error: ${err}`, "error");
         });
 }
 
 function triggerMasscan() {
     log("⚡ MASSCAN triggered by user", "tool");
-    document.getElementById("ai-comment").textContent = "🤖 AI: Running Masscan on WiFi subnet... ⚡";
     fetch("/api/masscan")
         .then(r => r.json())
         .then(data => {
-            document.getElementById("ai-comment").textContent =
-                `🤖 AI: Masscan found ${data.length} open ports across WiFi subnet`;
             data.forEach(r => addAlert(`Masscan: ${r.ip}:${r.port}/${r.proto} open`, "MEDIUM"));
             log(`⚡ Masscan complete — ${data.length} open port(s) found`, "tool");
         });
@@ -232,22 +429,14 @@ function triggerMasscan() {
 
 function triggerSniff() {
     log("📡 Packet sniff started on wlan0", "info");
-    document.getElementById("ai-comment").textContent = "🤖 AI: Sniffing wlan0 packets... 📡";
     fetch("/api/sniff?count=30")
         .then(r => r.json())
         .then(packets => {
             const feed = document.getElementById("packet-feed");
-            feed.innerHTML = "";
-            packets.forEach(p => {
-                const div = document.createElement("div");
-                div.className = "packet-item";
-                div.textContent = p.src
-                    ? `${p.src}:${p.sport||"?"} → ${p.dst}:${p.dport||"?"} [${p.proto}]`
-                    : p.summary;
-                feed.appendChild(div);
-            });
-            document.getElementById("ai-comment").textContent =
-                `🤖 AI: Captured ${packets.length} packets on wlan0`;
+            if (!feed) return;
+            feed.innerHTML = packets.map(p =>
+                `<div class="packet-item">${p.src ? `${p.src}:${p.sport||"?"} → ${p.dst}:${p.dport||"?"} [${p.proto}]` : p.summary}</div>`
+            ).join("");
             log(`📡 Sniff complete — ${packets.length} packets captured`, "success");
         });
 }
@@ -257,15 +446,16 @@ function loadAlerts() {
     fetch("/api/alerts")
         .then(r => r.json())
         .then(alerts => {
-            document.getElementById("alert-feed").innerHTML = "";
-            document.getElementById("total-alerts").textContent = alerts.length;
-            if (alerts.length === 0) {
-                document.getElementById("alert-feed").innerHTML = '<div class="empty">No alerts yet...</div>';
-                log("No alerts found in database", "info");
+            const feed = document.getElementById("alert-feed");
+            if (!feed) return;
+            feed.innerHTML = "";
+            setStatValue("total-alerts", alerts.length);
+            if (!alerts.length) {
+                feed.innerHTML = '<div class="empty-state"><div class="empty-icon">🛡️</div>No alerts yet...</div>';
             } else {
                 alerts.forEach(a => addAlert(a.alert, a.severity));
-                log(`✔ Loaded ${alerts.length} alert(s)`, "success");
             }
+            log(`✔ Loaded ${alerts.length} alert(s)`, "success");
         })
         .catch(err => log(`Error loading alerts: ${err}`, "error"));
 }
@@ -275,13 +465,11 @@ function clearDB() {
     fetch("/api/clear_db", { method: "POST" })
         .then(r => r.json())
         .then(() => {
-            document.getElementById("device-body").innerHTML = '<tr><td colspan="9" class="empty">Database cleared — run a new scan</td></tr>';
-            document.getElementById("alert-feed").innerHTML = '<div class="empty">No alerts yet...</div>';
-            document.getElementById("total-devices").textContent = "0";
-            document.getElementById("total-alerts").textContent = "0";
-            document.getElementById("total-ports").textContent = "0";
-            document.getElementById("total-threats").textContent = "0";
-            document.getElementById("total-vulns").textContent = "0";
+            const tbody = document.getElementById("device-body");
+            if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Database cleared — run a new scan</td></tr>';
+            const feed = document.getElementById("alert-feed");
+            if (feed) feed.innerHTML = '<div class="empty-state"><div class="empty-icon">🛡️</div>No alerts yet...</div>';
+            ["total-devices","total-alerts","total-ports","total-threats","total-vulns"].forEach(id => setStatValue(id, "0"));
             log("✔ Database cleared", "success");
         });
 }
@@ -292,13 +480,8 @@ function triggerTcpdump() {
         .then(r => r.json())
         .then(packets => {
             const feed = document.getElementById("packet-feed");
-            feed.innerHTML = "";
-            packets.forEach(p => {
-                const div = document.createElement("div");
-                div.className = "packet-item";
-                div.textContent = p;
-                feed.appendChild(div);
-            });
+            if (!feed) return;
+            feed.innerHTML = packets.map(p => `<div class="packet-item">${p}</div>`).join("");
             log(`📡 Tcpdump done — ${packets.length} packets`, "success");
         });
 }
@@ -309,13 +492,10 @@ function triggerTshark() {
         .then(r => r.json())
         .then(packets => {
             const feed = document.getElementById("packet-feed");
-            feed.innerHTML = "";
-            packets.forEach(p => {
-                const div = document.createElement("div");
-                div.className = "packet-item";
-                div.textContent = `${p.src}:${p.sport} → ${p.dst}:${p.dport} [${p.proto}] ${p.len}B`;
-                feed.appendChild(div);
-            });
+            if (!feed) return;
+            feed.innerHTML = packets.map(p =>
+                `<div class="packet-item">${p.src}:${p.sport} → ${p.dst}:${p.dport} [${p.proto}] ${p.len}B</div>`
+            ).join("");
             log(`🔍 Tshark done — ${packets.length} packets`, "success");
         });
 }
@@ -325,44 +505,51 @@ function generateReport() {
     fetch("/api/report")
         .then(r => r.json())
         .then(data => {
-            document.getElementById("ai-comment").textContent =
-                `🤖 AI: Report saved! Devices: ${data.total_devices} | Alerts: ${data.total_alerts} | High Risk: ${data.high_risk_alerts} | File: ${data.report_file}`;
+            const ai = document.getElementById("ai-comment");
+            if (ai) ai.textContent = `🤖 AI: Report saved! Devices: ${data.total_devices} | Alerts: ${data.total_alerts} | High Risk: ${data.high_risk_alerts} | File: ${data.report_file}`;
             log(`✔ Report generated: ${data.report_file}`, "success");
         })
         .catch(err => log(`Error generating report: ${err}`, "error"));
 }
 
-// Load current subnet immediately
-fetch("/api/subnet")
-    .then(r => r.json())
-    .then(data => {
-        if (data.subnet) document.getElementById("subnet-badge").textContent = "WiFi: " + data.subnet;
-    });
+// ── Init ──
+document.addEventListener("DOMContentLoaded", () => {
+    initCharts();
 
-// Load last scan results and update ALL stats correctly
-fetch("/api/scan_results")
-    .then(r => r.json())
-    .then(results => {
-        const devices = results.map(r => r.data);
-        if (devices.length) {
-            updateDeviceTable(devices);
-            const threatCount = devices.reduce((s, d) => s + (d.threats?.length || 0), 0);
-            const vulnCount   = devices.reduce((s, d) => s + (d.vulns?.length  || 0), 0);
-            const portCount   = devices.reduce((s, d) => s + (d.ports?.length  || 0), 0);
-            document.getElementById("total-devices").textContent = devices.length;
-            document.getElementById("total-threats").textContent = threatCount;
-            document.getElementById("total-vulns").textContent   = vulnCount;
-            document.getElementById("total-ports").textContent   = portCount;
-        }
-        // Load alerts AFTER devices so alert count reflects only current DB
-        fetch("/api/alerts")
-            .then(r => r.json())
-            .then(alerts => {
-                document.getElementById("total-alerts").textContent = alerts.length;
-                if (alerts.length === 0) {
-                    document.getElementById("alert-feed").innerHTML = '<div class="empty">No alerts yet...</div>';
-                } else {
-                    alerts.forEach(a => addAlert(a.alert, a.severity));
-                }
-            });
-    });
+    fetch("/api/subnet")
+        .then(r => r.json())
+        .then(data => {
+            if (data.subnet) {
+                const badge = document.getElementById("subnet-badge");
+                if (badge) badge.textContent = "WiFi: " + data.subnet;
+            }
+        });
+
+    fetch("/api/scan_results")
+        .then(r => r.json())
+        .then(results => {
+            const devices = results.map(r => r.data);
+            if (devices.length) {
+                updateDeviceTable(devices);
+                const threatCount = devices.reduce((s, d) => s + (d.threats?.length || 0), 0);
+                const vulnCount   = devices.reduce((s, d) => s + (d.vulns?.length  || 0), 0);
+                const portCount   = devices.reduce((s, d) => s + (d.ports?.length  || 0), 0);
+                setStatValue("total-devices", devices.length);
+                setStatValue("total-threats", threatCount);
+                setStatValue("total-vulns",   vulnCount);
+                setStatValue("total-ports",   portCount);
+            }
+            fetch("/api/alerts")
+                .then(r => r.json())
+                .then(alerts => {
+                    setStatValue("total-alerts", alerts.length);
+                    const feed = document.getElementById("alert-feed");
+                    if (!feed) return;
+                    if (!alerts.length) {
+                        feed.innerHTML = '<div class="empty-state"><div class="empty-icon">🛡️</div>No alerts yet...</div>';
+                    } else {
+                        alerts.slice(0, 20).forEach(a => addAlert(a.alert, a.severity));
+                    }
+                });
+        });
+});

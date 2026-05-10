@@ -16,12 +16,12 @@
         <span id="status-dot" class="dot green"></span>
         <span id="status-text">MONITORING ACTIVE</span>
     </div>
+    <div class="subnet-badge" id="subnet-badge">WiFi: detecting...</div>
     <div class="time" id="clock"></div>
 </header>
 
 <main>
 
-    <!-- Stats Bar -->
     <section class="stats-bar">
         <div class="stat-card">
             <div class="stat-label">DEVICES</div>
@@ -39,21 +39,33 @@
             <div class="stat-label">THREATS</div>
             <div class="stat-value red" id="total-threats">0</div>
         </div>
+        <div class="stat-card">
+            <div class="stat-label">VULNS</div>
+            <div class="stat-value critical" id="total-vulns">0</div>
+        </div>
     </section>
 
     <section class="grid">
 
         <!-- Device Table -->
-        <div class="panel">
-            <div class="panel-title">&#9632; CONNECTED DEVICES</div>
+        <div class="panel span2">
+            <div class="panel-title">&#9632; CONNECTED DEVICES (WiFi)</div>
             <table id="device-table">
                 <thead>
-                    <tr><th>IP</th><th>MAC</th><th>STATUS</th><th>COMMENT</th></tr>
+                    <tr><th>IP</th><th>MAC</th><th>OS</th><th>OPEN PORTS</th><th>THREATS</th><th>VULNS</th><th>COMMENT</th></tr>
                 </thead>
                 <tbody id="device-body">
-                    <tr><td colspan="4" class="empty">Waiting for scan...</td></tr>
+                    <tr><td colspan="7" class="empty">Waiting for scan...</td></tr>
                 </tbody>
             </table>
+        </div>
+
+        <!-- Live Terminal Log -->
+        <div class="panel span2" id="terminal-panel">
+            <div class="panel-title">&#9632; BACKGROUND ACTIVITY LOG
+                <span class="terminal-clear" onclick="clearLog()">[CLEAR]</span>
+            </div>
+            <div id="terminal-log"></div>
         </div>
 
         <!-- Alerts Panel -->
@@ -61,6 +73,14 @@
             <div class="panel-title">&#9632; THREAT ALERTS</div>
             <div id="alert-feed">
                 <div class="empty">No alerts yet...</div>
+            </div>
+        </div>
+
+        <!-- Packet Sniffer -->
+        <div class="panel">
+            <div class="panel-title">&#9632; LIVE PACKETS (wlan0)</div>
+            <div id="packet-feed">
+                <div class="empty">Click SNIFF to capture...</div>
             </div>
         </div>
 
@@ -78,14 +98,14 @@
 
     </section>
 
-    <!-- AI Comment -->
     <section class="ai-comment" id="ai-comment">
         &#128916; AI: Waiting for network data...
     </section>
 
-    <!-- Controls -->
     <section class="controls">
-        <button onclick="triggerScan()">&#9654; RUN SCAN</button>
+        <button onclick="triggerScan()">&#9654; FULL SCAN</button>
+        <button onclick="triggerMasscan()">&#9889; MASSCAN</button>
+        <button onclick="triggerSniff()">&#128246; SNIFF</button>
         <button onclick="loadAlerts()">&#9888; LOAD ALERTS</button>
         <button onclick="generateReport()">&#128196; EXPORT REPORT</button>
     </section>

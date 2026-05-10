@@ -58,8 +58,18 @@ header {
 
 .stat-label { font-size: 0.7rem; color: #888; letter-spacing: 2px; margin-bottom: 8px; }
 .stat-value { font-size: 2rem; font-weight: bold; color: #00ff00; text-shadow: 0 0 8px #00ff00; }
-.stat-value.red    { color: #ff4444; text-shadow: 0 0 8px #ff4444; }
-.stat-value.yellow { color: #ffcc00; text-shadow: 0 0 8px #ffcc00; }
+.stat-value.red      { color: #ff4444; text-shadow: 0 0 8px #ff4444; }
+.stat-value.yellow   { color: #ffcc00; text-shadow: 0 0 8px #ffcc00; }
+.stat-value.critical { color: #ff00ff; text-shadow: 0 0 8px #ff00ff; }
+
+/* Subnet badge */
+.subnet-badge {
+    font-size: 0.75rem;
+    color: #00cccc;
+    border: 1px solid #00cccc44;
+    padding: 4px 10px;
+    border-radius: 3px;
+}
 
 /* Grid */
 .grid {
@@ -68,6 +78,7 @@ header {
     gap: 16px;
     padding: 0 30px;
 }
+.span2 { grid-column: span 2; }
 
 .panel {
     background: #111;
@@ -104,6 +115,13 @@ tr:hover td { background: #0d1a0d; }
     background: #1a0000;
     color: #ff6666;
     border-radius: 2px;
+    font-size: 0.75rem;
+}
+
+.alert-item.critical {
+    border-left-color: #ff00ff;
+    background: #1a001a;
+    color: #ff66ff;
 }
 
 .alert-item.safe {
@@ -111,6 +129,21 @@ tr:hover td { background: #0d1a0d; }
     background: #001a00;
     color: #00ff00;
 }
+
+/* Packet feed */
+.packet-item {
+    padding: 5px 8px;
+    margin-bottom: 4px;
+    border-left: 2px solid #00cccc44;
+    color: #00cccc;
+    font-size: 0.75rem;
+}
+
+/* Inline color classes */
+.red      { color: #ff4444; }
+.green    { color: #00ff00; }
+.yellow   { color: #ffcc00; }
+.critical { color: #ff00ff; }
 
 /* Charts */
 canvas { max-height: 220px; }
@@ -153,6 +186,38 @@ button:hover {
     color: #000;
     box-shadow: 0 0 12px #00ff00;
 }
+
+/* Terminal Log */
+#terminal-panel { max-height: 220px; }
+
+#terminal-log {
+    font-size: 0.78rem;
+    height: 160px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column-reverse;
+}
+
+.log-line {
+    padding: 2px 4px;
+    border-bottom: 1px solid #0d0d0d;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.log-line.info    { color: #00ff00; }
+.log-line.warn    { color: #ffcc00; }
+.log-line.error   { color: #ff4444; }
+.log-line.success { color: #00ccff; }
+.log-line.tool    { color: #cc88ff; }
+
+.terminal-clear {
+    float: right;
+    font-size: 0.7rem;
+    color: #444;
+    cursor: pointer;
+    letter-spacing: 1px;
+}
+.terminal-clear:hover { color: #ff4444; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; }

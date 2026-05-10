@@ -12,7 +12,7 @@ def searchsploit_scan(services: dict):
         query = " ".join(svc.split()[:2])
         try:
             out = subprocess.check_output(
-                ["searchsploit", "--colour", query],
+                ["searchsploit", query],
                 stderr=subprocess.DEVNULL, timeout=15, text=True
             )
             for line in out.splitlines():

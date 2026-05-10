@@ -265,7 +265,8 @@ def api_subnet():
 
 @app.route("/api/scan")
 def api_scan():
-    return jsonify(run_scan())
+    threading.Thread(target=run_scan, daemon=True).start()
+    return jsonify({"status": "started"})
 
 @app.route("/api/masscan")
 def api_masscan():

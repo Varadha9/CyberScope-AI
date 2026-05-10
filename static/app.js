@@ -67,6 +67,8 @@ function pushChart(chart, label, value) {
 const sevColor = { CRITICAL: "critical", HIGH: "red", MEDIUM: "yellow", LOW: "green", SAFE: "green" };
 
 socket.on("scan_complete", (data) => {
+    hideSpinner();
+    document.getElementById("status-text").textContent = "MONITORING ACTIVE";
     const devices = data.devices || [];
     if (data.subnet) document.getElementById("subnet-badge").textContent = "WiFi: " + data.subnet;
     updateDeviceTable(devices);
@@ -203,14 +205,10 @@ function triggerScan() {
     showSpinner("SCANNING NETWORK...");
     fetch("/api/scan")
         .then(r => r.json())
-        .then(data => {
+        .then(() => {
             hideSpinner();
-            if (data && data.length > 0) {
-                updateDeviceTable(data);
-                document.getElementById("total-devices").textContent = data.length;
-            }
             document.getElementById("status-text").textContent = "MONITORING ACTIVE";
-            log(`✔ Fast scan done — ${data.length || 0} device(s) found. Deep scan running in background...`, "success");
+            log("✔ Scan started — results will appear via live updates...", "success");
         })
         .catch(err => {
             hideSpinner();

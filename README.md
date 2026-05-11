@@ -89,6 +89,7 @@ Runs in parallel background threads per device — does not block the UI:
 - **Gobuster** — directory and file brute-forcing on web servers
 - **WFuzz** — web application fuzzer for parameter and path discovery
 - **Hydra** — online password brute-force for SSH, FTP, HTTP, and other services
+- **John the Ripper** — offline hash cracking using rockyou wordlist; auto-grabs hashes from exposed MySQL and SMB services
 - **Netcat** — banner grabbing and raw TCP/UDP service probing
 - **TCPDump** — low-level packet capture and traffic analysis per host
 - **TShark** — Wireshark CLI for deep packet inspection and protocol dissection
@@ -163,6 +164,7 @@ CyberScope-AI/
 │   ├── gobuster_runner.py    # Web directory and file brute-forcing
 │   ├── wfuzz_runner.py       # Web application fuzzer
 │   ├── hydra_runner.py       # Online password brute-force (SSH, FTP, HTTP, etc.)
+│   ├── john_runner.py        # Offline hash cracking — rockyou wordlist, auto hash grab from MySQL/SMB
 │   ├── netcat_runner.py      # Banner grabbing and raw service probing
 │   ├── tcpdump_runner.py     # Low-level packet capture per host
 │   └── tshark_runner.py      # Deep packet inspection via TShark/Wireshark CLI
@@ -221,6 +223,7 @@ CyberScope-AI/
 | `gobuster` | Web directory brute-forcer | `sudo apt install gobuster` |
 | `wfuzz` | Web application fuzzer | `sudo apt install wfuzz` |
 | `hydra` | Password brute-force tool | `sudo apt install hydra` |
+| `john` | Offline hash cracker | `sudo apt install john` |
 | `netcat-openbsd` | Banner grabbing / raw probing | `sudo apt install netcat-openbsd` |
 | `tcpdump` | Packet capture | `sudo apt install tcpdump` |
 | `tshark` | Deep packet inspection | `sudo apt install tshark` |
@@ -230,7 +233,7 @@ Install all at once:
 ```bash
 sudo apt update && sudo apt install nmap masscan nikto metasploit-framework netdiscover \
   sslscan whatweb exploitdb enum4linux dnsrecon fierce wpscan sqlmap gobuster wfuzz \
-  hydra netcat-openbsd tcpdump tshark -y
+  hydra john netcat-openbsd tcpdump tshark -y
 ```
 
 ### Python Dependencies
@@ -261,7 +264,7 @@ cd CyberScope-AI
 ```bash
 sudo apt update && sudo apt install nmap masscan nikto metasploit-framework netdiscover \
   sslscan whatweb exploitdb enum4linux dnsrecon fierce wpscan sqlmap gobuster wfuzz \
-  hydra netcat-openbsd tcpdump tshark -y
+  hydra john netcat-openbsd tcpdump tshark -y
 ```
 
 ### 3. Install Python dependencies
@@ -298,6 +301,7 @@ The background scan starts automatically on launch. The dashboard will populate 
 | `/api/scan_results` | GET | List latest scan results per device |
 | `/api/report` | GET | Generate and save CSV report |
 | `/api/subnet` | GET | Get current detected WiFi subnet |
+| `/api/john` | GET | Crack hashes on target (`?target=IP&ports=22,3306`) |
 | `/api/clear_db` | POST | Wipe all devices, alerts, scan results |
 
 ---
@@ -363,6 +367,7 @@ The background scan starts automatically on launch. The dashboard will populate 
 │  ├── gobuster         → web directory brute-force       │
 │  ├── wfuzz            → web fuzzing                     │
 │  ├── hydra            → password brute-force            │
+│  ├── john             → offline hash cracking           │
 │  ├── netcat           → banner grabbing                 │
 │  ├── tcpdump          → packet capture per host         │
 │  └── tshark           → deep packet inspection          │
@@ -446,6 +451,7 @@ From a real scan on a home network:
 | Injection Testing | SQLMap | Automated SQL injection detection |
 | Directory Fuzzing | Gobuster + WFuzz | Web path and parameter discovery |
 | Brute Force | Hydra | Online credential brute-forcing |
+| Hash Cracking | John the Ripper | Offline hash cracking with rockyou wordlist |
 | Service Probing | Netcat | Raw TCP/UDP banner grabbing |
 | Packet Analysis | TCPDump + TShark | Deep traffic capture and inspection |
 | Exploitation Framework | Metasploit (msfconsole) | Auxiliary service scanners |

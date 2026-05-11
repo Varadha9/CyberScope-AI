@@ -21,6 +21,7 @@ from kali_tools.wfuzz_runner import wfuzz_scan
 from kali_tools.dnsrecon_runner import dnsrecon_scan
 from kali_tools.fierce_runner import fierce_scan
 from kali_tools.netcat_runner import netcat_banner
+from kali_tools.john_runner import john_scan
 from kali_tools.searchsploit_runner import searchsploit_scan
 from kali_tools.tcpdump_runner import tcpdump_capture
 from kali_tools.tshark_runner import tshark_capture
@@ -143,6 +144,11 @@ def deep_scan(ip, ports, result):
         hydra_results = hydra_scan(ip, ports)
         log(f"[{ip}] Hydra done: {len(hydra_results)} credential(s) found", "warn" if hydra_results else "success")
 
+        # John the Ripper
+        log(f"[{ip}] Running John the Ripper hash cracker...", "tool")
+        john_results = john_scan(ip, ports)
+        log(f"[{ip}] John done: {len(john_results)} hash(es) cracked", "warn" if john_results else "success")
+
         # Enum4linux (SMB/Windows)
         enum4linux_results = []
         if any(p in ports for p in (139, 445)):
@@ -171,6 +177,9 @@ def deep_scan(ip, ports, result):
         for m in msf_results:
             save_alert(f"MSF {ip}: {m}", "HIGH")
             socketio.emit("alert", {"message": f"MSF {ip}: {m}", "severity": "HIGH"})
+        for j in john_results:
+            save_alert(f"JOHN {ip}: {j}", "CRITICAL")
+            socketio.emit("alert", {"message": f"JOHN {ip}: {j}", "severity": "CRITICAL"})
 
         result.update({
             "services": services, "os": os_info,
@@ -179,7 +188,7 @@ def deep_scan(ip, ports, result):
             "whatweb": whatweb_results, "wpscan": wpscan_results,
             "sqlmap": sqlmap_results, "gobuster": gobuster_results,
             "wfuzz": wfuzz_results, "sslscan": sslscan_results,
-            "hydra": hydra_results, "enum4linux": enum4linux_results,
+            "hydra": hydra_results, "john": john_results, "enum4linux": enum4linux_results,
             "searchsploit": searchsploit_results, "nc_banners": nc_banners,
         })
         save_scan_result(ip, result)
@@ -233,7 +242,7 @@ def run_scan():
             "vulns": [], "nikto": [], "msf": [],
             "whatweb": [], "wpscan": [], "sqlmap": [],
             "gobuster": [], "wfuzz": [], "sslscan": [],
-            "hydra": [], "enum4linux": [], "searchsploit": [],
+            "hydra": [], "john": [], "enum4linux": [], "searchsploit": [],
             "nc_banners": {}, "comment": comment
         }
         results.append(result)
@@ -313,6 +322,14 @@ def api_dnsrecon():
     if not target:
         return jsonify({"error": "target required"}), 400
     return jsonify(dnsrecon_scan(target))
+
+@app.route("/api/john")
+def api_john():
+    target = request.args.get("target", "")
+    ports  = [int(p) for p in request.args.get("ports", "").split(",") if p.isdigit()]
+    if not target:
+        return jsonify({"error": "target required"}), 400
+    return jsonify(john_scan(target, ports))
 
 @app.route("/api/fierce")
 def api_fierce():

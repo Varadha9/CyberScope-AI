@@ -1,7 +1,12 @@
 # 🔭 CyberScope AI
 
 > **Real-time WiFi Network Security Monitor & Vulnerability Scanner**  
-> Built on Kali Linux · Powered by Nmap, Nikto, Metasploit, Scapy · Live WebSocket Dashboard
+> Built on Kali Linux · Powered by 20+ Security Tools · Live WebSocket Dashboard
+
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Python](https://img.shields.io/badge/python-3.x-green)
+![Platform](https://img.shields.io/badge/platform-Kali%20Linux-purple)
+![Status](https://img.shields.io/badge/status-active-brightgreen)
 
 ---
 
@@ -29,7 +34,7 @@ CyberScope AI is an **automated WiFi network security monitoring system** that:
 2. Discovers every device connected to the network
 3. Scans each device for open ports and running services
 4. Detects security threats based on exposed ports
-5. Runs deep vulnerability assessments using professional-grade tools
+5. Runs deep vulnerability assessments using 20+ professional-grade tools
 6. Uses an AI behavior engine to classify each device
 7. Streams all results live to a browser dashboard via WebSockets
 8. Stores all findings in a database and generates exportable reports
@@ -42,6 +47,7 @@ It is designed to work **out of the box** — just run one command and open your
 
 ### 🔍 Network Discovery
 - **ARP Scanning** via Scapy — sends ARP requests to every IP in the subnet and collects responses
+- **ARPing Runner** — alternative ARP-based host discovery using `arping`
 - **Netdiscover** — passive/active ARP-based host discovery as a secondary sweep
 - **Nmap Ping Scan** — fallback when ARP is blocked (client isolation networks)
 - **Gateway Detection** — always includes the router even if ARP is blocked
@@ -71,7 +77,21 @@ Runs in parallel background threads per device — does not block the UI:
 - **OS Fingerprinting** — `nmap -O` detects the operating system (Windows 11, Linux, Android, etc.)
 - **Vulnerability Scripts** — `nmap --script vuln` checks for known CVEs and exploitable conditions
 - **Nikto Web Scanner** — scans HTTP/HTTPS ports for web vulnerabilities, missing headers, CVEs
-- **Metasploit Auxiliary Scanners** — runs `msfconsole` auxiliary modules to confirm service versions and gather intelligence
+- **Metasploit Auxiliary Scanners** — runs `msfconsole` auxiliary modules per open port
+- **SSLScan** — detects weak SSL/TLS ciphers, expired certificates, POODLE/BEAST/HEARTBLEED
+- **WhatWeb** — fingerprints web technologies, CMS, frameworks, and server versions
+- **SearchSploit** — searches Exploit-DB for known exploits matching detected services
+- **Enum4Linux** — enumerates SMB shares, users, groups, and policies on Windows/Samba hosts
+- **DNSRecon** — performs DNS enumeration, zone transfers, and subdomain discovery
+- **Fierce** — DNS reconnaissance and network range discovery
+- **WPScan** — WordPress vulnerability scanner for themes, plugins, and user enumeration
+- **SQLMap** — automated SQL injection detection and exploitation on web endpoints
+- **Gobuster** — directory and file brute-forcing on web servers
+- **WFuzz** — web application fuzzer for parameter and path discovery
+- **Hydra** — online password brute-force for SSH, FTP, HTTP, and other services
+- **Netcat** — banner grabbing and raw TCP/UDP service probing
+- **TCPDump** — low-level packet capture and traffic analysis per host
+- **TShark** — Wireshark CLI for deep packet inspection and protocol dissection
 
 ### ⚡ Masscan Integration
 - Ultra-fast port discovery across the entire subnet
@@ -90,6 +110,7 @@ Runs in parallel background threads per device — does not block the UI:
 - Threat alerts feed with color-coded severity
 - Charts for device count and threat levels over time
 - Loading spinner during active scans
+- Dedicated pages for Alerts, Device Detail, Network Map, and Reports
 
 ### 💾 Persistent Storage
 - SQLite database stores all devices, alerts, and scan results
@@ -101,6 +122,7 @@ Runs in parallel background threads per device — does not block the UI:
 - Exports full scan summary as a **CSV file**
 - Includes all devices, open ports, OS, threats, vulns, MSF findings
 - JSON summary with totals for devices, alerts, high-risk findings
+- Dedicated Reports page in the dashboard UI
 
 ---
 
@@ -126,9 +148,24 @@ CyberScope-AI/
 ├── kali_tools/
 │   ├── nmap_advanced.py      # OS detection (-O), service scan (-sV), vuln scripts (--script vuln)
 │   ├── masscan_runner.py     # Fast full-subnet port discovery via masscan
-│   ├── nikto_runner.py       # Web vulnerability scanner — finds CVEs, missing headers, misconfigs
-│   ├── msf_runner.py         # Metasploit auxiliary scanner — runs msfconsole RC scripts per port
-│   └── netdiscover_runner.py # ARP-based passive/active host discovery
+│   ├── nikto_runner.py       # Web vulnerability scanner — CVEs, missing headers, misconfigs
+│   ├── msf_runner.py         # Metasploit auxiliary scanner — msfconsole RC scripts per port
+│   ├── netdiscover_runner.py # ARP-based passive/active host discovery
+│   ├── arping_runner.py      # ARP ping host discovery using arping
+│   ├── sslscan_runner.py     # SSL/TLS cipher and certificate weakness detection
+│   ├── whatweb_runner.py     # Web technology and CMS fingerprinting
+│   ├── searchsploit_runner.py# Exploit-DB search for known CVEs matching services
+│   ├── enum4linux_runner.py  # SMB/Samba enumeration — shares, users, groups
+│   ├── dnsrecon_runner.py    # DNS enumeration, zone transfers, subdomain discovery
+│   ├── fierce_runner.py      # DNS recon and network range discovery
+│   ├── wpscan_runner.py      # WordPress vulnerability scanner
+│   ├── sqlmap_runner.py      # SQL injection detection and exploitation
+│   ├── gobuster_runner.py    # Web directory and file brute-forcing
+│   ├── wfuzz_runner.py       # Web application fuzzer
+│   ├── hydra_runner.py       # Online password brute-force (SSH, FTP, HTTP, etc.)
+│   ├── netcat_runner.py      # Banner grabbing and raw service probing
+│   ├── tcpdump_runner.py     # Low-level packet capture per host
+│   └── tshark_runner.py      # Deep packet inspection via TShark/Wireshark CLI
 │
 ├── sniffer/
 │   └── packet_sniffer.py     # Live packet capture on wlan0 using Scapy
@@ -144,7 +181,11 @@ CyberScope-AI/
 │   └── style.css             # Hacker-themed dark dashboard styles
 │
 ├── templates/
-│   └── dashboard.html        # Main web dashboard (single page)
+│   ├── dashboard.html        # Main web dashboard (single page)
+│   ├── alerts.html           # Dedicated alerts view page
+│   ├── device.html           # Per-device detail page
+│   ├── map.html              # Network topology map page
+│   └── reports.html          # Reports and export page
 │
 └── logs/
     ├── cyberscope.db         # SQLite database (auto-created)
@@ -169,11 +210,27 @@ CyberScope-AI/
 | `nikto` | Web server vulnerability scanning | `sudo apt install nikto` |
 | `metasploit-framework` | Auxiliary service scanners | `sudo apt install metasploit-framework` |
 | `netdiscover` | ARP-based host discovery | `sudo apt install netdiscover` |
+| `sslscan` | SSL/TLS weakness detection | `sudo apt install sslscan` |
+| `whatweb` | Web technology fingerprinting | `sudo apt install whatweb` |
+| `exploitdb` | SearchSploit — Exploit-DB search | `sudo apt install exploitdb` |
+| `enum4linux` | SMB/Samba enumeration | `sudo apt install enum4linux` |
+| `dnsrecon` | DNS enumeration | `sudo apt install dnsrecon` |
+| `fierce` | DNS recon and range discovery | `sudo apt install fierce` |
+| `wpscan` | WordPress vulnerability scanner | `sudo apt install wpscan` |
+| `sqlmap` | SQL injection scanner | `sudo apt install sqlmap` |
+| `gobuster` | Web directory brute-forcer | `sudo apt install gobuster` |
+| `wfuzz` | Web application fuzzer | `sudo apt install wfuzz` |
+| `hydra` | Password brute-force tool | `sudo apt install hydra` |
+| `netcat-openbsd` | Banner grabbing / raw probing | `sudo apt install netcat-openbsd` |
+| `tcpdump` | Packet capture | `sudo apt install tcpdump` |
+| `tshark` | Deep packet inspection | `sudo apt install tshark` |
 | `python3` | Runtime | Pre-installed |
 
 Install all at once:
 ```bash
-sudo apt update && sudo apt install nmap masscan nikto metasploit-framework netdiscover -y
+sudo apt update && sudo apt install nmap masscan nikto metasploit-framework netdiscover \
+  sslscan whatweb exploitdb enum4linux dnsrecon fierce wpscan sqlmap gobuster wfuzz \
+  hydra netcat-openbsd tcpdump tshark -y
 ```
 
 ### Python Dependencies
@@ -196,23 +253,30 @@ pip install -r requirements.txt
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/<your-username>/CyberScope-AI.git
+git clone https://github.com/varad-comrad/CyberScope-AI.git
 cd CyberScope-AI
 ```
 
-### 2. Install Python dependencies
+### 2. Install system tools
+```bash
+sudo apt update && sudo apt install nmap masscan nikto metasploit-framework netdiscover \
+  sslscan whatweb exploitdb enum4linux dnsrecon fierce wpscan sqlmap gobuster wfuzz \
+  hydra netcat-openbsd tcpdump tshark -y
+```
+
+### 3. Install Python dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Run the application
+### 4. Run the application
 ```bash
 sudo bash run.sh
 ```
 
 > **Root privileges are required** — Scapy ARP scanning and Nmap OS fingerprinting need raw socket access.
 
-### 4. Open the dashboard
+### 5. Open the dashboard
 ```
 http://localhost:5000
 ```
@@ -238,6 +302,18 @@ The background scan starts automatically on launch. The dashboard will populate 
 
 ---
 
+## 📄 Dashboard Pages
+
+| Page | Route | Description |
+|------|-------|-------------|
+| **Dashboard** | `/` | Main live scan view — devices, stats, activity log |
+| **Alerts** | `/alerts` | Full threat alerts feed with filtering |
+| **Device Detail** | `/device/<ip>` | Per-device deep scan results and findings |
+| **Network Map** | `/map` | Visual network topology map |
+| **Reports** | `/reports` | Export and view generated scan reports |
+
+---
+
 ## 🔄 How It Works — Full Scan Flow
 
 ```
@@ -252,6 +328,7 @@ The background scan starts automatically on launch. The dashboard will populate 
 ┌────────────────────────▼────────────────────────────────┐
 │                  DEVICE DISCOVERY                       │
 │  ARP Scan (Scapy) ──► finds devices by MAC+IP           │
+│  ARPing Runner ─────► alternative ARP discovery         │
 │       │ if blocked                                      │
 │  Nmap Ping Scan ────► fallback host discovery           │
 │       │ if still empty                                  │
@@ -270,11 +347,25 @@ The background scan starts automatically on launch. The dashboard will populate 
                          │
 ┌────────────────────────▼────────────────────────────────┐
 │           DEEP SCAN (per device, parallel threads)      │
-│  ├── nmap -sV    → service & version detection          │
-│  ├── nmap -O     → OS fingerprinting                    │
+│  ├── nmap -sV         → service & version detection     │
+│  ├── nmap -O          → OS fingerprinting               │
 │  ├── nmap --script vuln → CVE checks                    │
-│  ├── nikto       → web vulnerability scan (port 80/443) │
-│  └── msfconsole  → auxiliary scanners per open port     │
+│  ├── nikto            → web vulnerability scan          │
+│  ├── msfconsole       → auxiliary scanners per port     │
+│  ├── sslscan          → SSL/TLS weakness detection      │
+│  ├── whatweb          → web tech fingerprinting         │
+│  ├── searchsploit     → Exploit-DB CVE matching         │
+│  ├── enum4linux       → SMB/Samba enumeration           │
+│  ├── dnsrecon         → DNS enumeration                 │
+│  ├── fierce           → DNS recon                       │
+│  ├── wpscan           → WordPress vuln scan             │
+│  ├── sqlmap           → SQL injection detection         │
+│  ├── gobuster         → web directory brute-force       │
+│  ├── wfuzz            → web fuzzing                     │
+│  ├── hydra            → password brute-force            │
+│  ├── netcat           → banner grabbing                 │
+│  ├── tcpdump          → packet capture per host         │
+│  └── tshark           → deep packet inspection          │
 │  All results → save to DB → push live to dashboard      │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -346,10 +437,21 @@ From a real scan on a home network:
 | Port Scanning | Nmap + python-nmap | Fast scan, OS detection, vuln scripts |
 | Fast Discovery | Masscan | High-speed full-subnet port scan |
 | Web Vuln Scan | Nikto | HTTP/HTTPS vulnerability assessment |
+| SSL Analysis | SSLScan | TLS cipher and certificate weakness detection |
+| Web Fingerprinting | WhatWeb | CMS and technology identification |
+| Exploit Search | SearchSploit | Exploit-DB CVE matching |
+| SMB Enumeration | Enum4Linux | Windows/Samba share and user enumeration |
+| DNS Recon | DNSRecon + Fierce | DNS enumeration and zone transfer |
+| CMS Scanning | WPScan | WordPress vulnerability assessment |
+| Injection Testing | SQLMap | Automated SQL injection detection |
+| Directory Fuzzing | Gobuster + WFuzz | Web path and parameter discovery |
+| Brute Force | Hydra | Online credential brute-forcing |
+| Service Probing | Netcat | Raw TCP/UDP banner grabbing |
+| Packet Analysis | TCPDump + TShark | Deep traffic capture and inspection |
 | Exploitation Framework | Metasploit (msfconsole) | Auxiliary service scanners |
-| Host Discovery | Netdiscover | ARP-based passive/active discovery |
+| Host Discovery | Netdiscover + ARPing | ARP-based passive/active discovery |
 | Database | SQLite | Persistent storage — devices, alerts, results |
-| Frontend | HTML + CSS + JavaScript | Dashboard UI |
+| Frontend | HTML + CSS + JavaScript | Multi-page dashboard UI |
 | Charts | Chart.js | Device activity and threat level charts |
 
 ---

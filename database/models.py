@@ -27,7 +27,33 @@ def init_db():
         )
     """)
     conn.commit()
+    # Auto-clean noise alerts on every startup
+    _clean_noise(conn)
     conn.close()
+
+def _clean_noise(conn):
+    """Remove known noise/false-positive entries from DB."""
+    noise_patterns = [
+        "JOHN%No John-relevant%",
+        "JOHN%John-relevant ports detected%",
+    ]
+    for p in noise_patterns:
+        conn.execute("DELETE FROM alerts WHERE alert LIKE ?", (p,))
+    # Fix scan_results john field
+    rows = conn.execute("SELECT ip, data FROM scan_results").fetchall()
+    for ip, data_str in rows:
+        try:
+            data = json.loads(data_str)
+            john = data.get("john", [])
+            clean = [j for j in john if j and "No John-relevant" not in j
+                     and "John-relevant ports detected" not in j]
+            if len(clean) != len(john):
+                data["john"] = clean
+                conn.execute("UPDATE scan_results SET data=? WHERE ip=?",
+                             (json.dumps(data), ip))
+        except Exception:
+            pass
+    conn.commit()
 
 def save_device(ip, mac):
     conn = sqlite3.connect(DB)

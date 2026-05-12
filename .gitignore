@@ -4,6 +4,7 @@ __pycache__/
 logs/*.db
 logs/*.csv
 logs/.last_subnet
-*.txt
+logs/server.log
+*.restore
 .env
 venv/

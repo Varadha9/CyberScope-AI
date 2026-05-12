@@ -15,10 +15,10 @@ def os_detect(target):
     return "Unknown"
 
 def service_scan(target):
-    """Service/version detection -sV"""
+    """Service/version detection -sV on known open ports only"""
     services = {}
     try:
-        _nm.scan(target, arguments="-sV -T4 --open -p 1-65535")
+        _nm.scan(target, arguments="-sV -T4 --open --top-ports 1000")
         for host in _nm.all_hosts():
             for proto in _nm[host].all_protocols():
                 for port, data in _nm[host][proto].items():

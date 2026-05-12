@@ -93,6 +93,30 @@ function pushChart(chart, label, value) {
     chart.update();
 }
 
+// ── MAC Vendor Lookup ──
+// Vendor map loaded from /api/oui on init
+let _OUI_MAP = {};
+
+function _macVendor(mac) {
+    if (!mac || mac === "00:00:00:00:00:00") return "";
+    const oui = mac.replace(/:/g, "").toUpperCase().slice(0, 6);
+    try {
+        if ([2, 6, 0xA, 0xE].includes(parseInt(oui[1], 16))) return "[Randomized MAC]";
+    } catch(e) {}
+    return _OUI_MAP[oui] || "";
+}
+
+function _deviceLabel(d) {
+    // Priority: real hostname > device_type from passive intel > vendor label > MAC
+    const hn = d.hostname || "";
+    if (hn && hn !== "unknown" && hn !== "") return hn;
+    if (d.device_type) return d.device_type;
+    const v = _macVendor(d.mac || "");
+    if (v && v !== "[Randomized MAC]") return v;
+    if (v === "[Randomized MAC]") return "📱 Phone/Laptop";
+    return "";
+}
+
 // ── Risk Scoring ──
 function getRiskScore(d) {
     let s = 0;
@@ -103,6 +127,11 @@ function getRiskScore(d) {
     s += (d.hydra?.length || 0) * 25;
     s += (d.sqlmap?.length || 0) * 20;
     s += (d.wpscan?.length || 0) * 10;
+    // CVSS score contribution (max 40 points)
+    const cvss = d.max_cvss || 0;
+    if (cvss >= 9.0) s += 40;
+    else if (cvss >= 7.0) s += 25;
+    else if (cvss >= 4.0) s += 10;
     return Math.min(s, 100);
 }
 
@@ -123,13 +152,18 @@ function getRiskColor(score) {
 }
 
 function getDeviceIcon(d) {
-    const h = (d.hostname || "").toLowerCase();
+    const h = (_deviceLabel(d) || d.hostname || "").toLowerCase();
     const o = (d.os || "").toLowerCase();
-    if (h.includes("router") || h.includes("fiber") || h.includes("jio") || h.includes("gateway")) return "🌐";
-    if (h.includes("phone") || h.includes("android") || h.includes("vivo") || h.includes("redmi") || h.includes("samsung")) return "📱";
-    if (h.includes("camera") || h.includes("nvr") || h.includes("hik")) return "📷";
-    if (h.includes("laptop")) return "💻";
-    if (o.includes("windows") || h.includes("desktop") || h.includes("pc")) return "🖥️";
+    if (h.includes("router") || h.includes("gateway") || h.includes("jio") || h.includes("fiber")) return "🌐";
+    if (h.includes("camera") || h.includes("nvr") || h.includes("hikvision") || h.includes("dahua")) return "📷";
+    if (h.includes("printer")) return "🖨️";
+    if (h.includes("playstation") || h.includes("xbox") || h.includes("nintendo") || h.includes("steam")) return "🎮";
+    if (h.includes("raspberry") || h.includes("esp32") || h.includes("iot") || h.includes("arduino") || h.includes("tuya")) return "🧠";
+    if (h.includes("apple") || h.includes("iphone") || h.includes("ipad") || h.includes("macbook")) return "🍎";
+    if (h.includes("dell") || h.includes("lenovo") || h.includes("hp ") || h.includes("acer") || h.includes("asus") || h.includes("msi") || h.includes("toshiba")) return "💻";
+    if (h.includes("intel") || h.includes("broadcom") || h.includes("realtek") || o.includes("windows") || h.includes("desktop") || h.includes("pc")) return "🖥️";
+    if (h.includes("xiaomi") || h.includes("samsung") || h.includes("vivo") || h.includes("oppo") || h.includes("realme") || h.includes("oneplus") || h.includes("huawei") || h.includes("motorola") || h.includes("zte") || h.includes("phone") || h.includes("randomized")) return "📱";
+    if (h.includes("wifi device") || h.includes("azurewave") || h.includes("lite-on") || h.includes("murata") || h.includes("mediatek") || h.includes("qualcomm")) return "📱";
     if (o.includes("linux")) return "🐧";
     return "📡";
 }
@@ -178,6 +212,7 @@ function buildToolBadges(d) {
         d.enum4linux?.length   ? `<span class="tool-badge warn" title="Enum4linux">SMB:${d.enum4linux.length}</span>` : "",
         d.nikto?.length     ? `<span class="tool-badge warn" title="Nikto">NK:${d.nikto.length}</span>` : "",
         d.msf?.length       ? `<span class="tool-badge vuln" title="Metasploit">MSF:${d.msf.length}</span>` : "",
+        d.john?.length      ? `<span class="tool-badge vuln" title="John the Ripper">JTR:${d.john.length}</span>` : "",
     ].filter(Boolean);
     return badges.length ? `<div class="tool-badges">${badges.join("")}</div>` : `<span class="text-dim">—</span>`;
 }
@@ -201,6 +236,7 @@ function buildExpandedRow(d, colSpan) {
         { label: "🔍 WPScan",     items: d.wpscan,       cls: "high"     },
         { label: "📁 Gobuster",   items: d.gobuster,     cls: "medium"   },
         { label: "🌐 WhatWeb",    items: d.whatweb,      cls: "info"     },
+        { label: "🔑 John",        items: d.john,         cls: "critical" },
     ].filter(s => s.items?.length);
 
     return `<tr class="expanded-row">
@@ -244,20 +280,26 @@ function updateDeviceTable(devices) {
     if (label) label.textContent = unique.length + " device(s)";
 
     tbody.innerHTML = unique.map(d => {
-        const score = getRiskScore(d);
-        const cls   = getRiskClass(score);
-        const color = getRiskColor(score);
-        const icon  = getDeviceIcon(d);
-        const rowBg = score >= 70 ? "background:#ff00aa08" : score >= 50 ? "background:#ff444408" : score >= 20 ? "background:#ffd70008" : "";
+        const score  = getRiskScore(d);
+        const cls    = getRiskClass(score);
+        const color  = getRiskColor(score);
+        const icon   = getDeviceIcon(d);
+        const label  = _deviceLabel(d);
+        const dtype  = d.device_type || "";
+        const ipv6   = d.ipv6 || "";
+        const rowBg  = score >= 70 ? "background:#ff00aa08" : score >= 50 ? "background:#ff444408" : score >= 20 ? "background:#ffd70008" : "";
         return `<tr class="device-row" style="${rowBg}" onclick="toggleExpand(this, '${d.ip}')" data-ip="${d.ip}">
             <td>
                 <a href="/device/${d.ip}" class="ip-link" onclick="event.stopPropagation()">
                     <span class="device-icon">${icon}</span>${d.ip}
                 </a>
-                <div class="hostname-text">${d.hostname && d.hostname !== "unknown" ? d.hostname : ""}</div>
+                ${label ? `<div style="color:var(--cyan);font-size:0.82rem;font-weight:600;margin-top:2px">${label}</div>` : ""}
+                ${ipv6 ? `<div style="color:var(--text-dim);font-size:0.68rem;font-family:'Courier New',monospace" title="IPv6 link-local">${ipv6.slice(0,28)}...</div>` : ""}
+                ${dtype && dtype !== label ? `<div style="color:var(--text-dim);font-size:0.72rem">${dtype}</div>` : ""}
+                <a href="/watch/${d.ip}" onclick="event.stopPropagation()" style="font-size:0.68rem;color:var(--text-dim);margin-top:2px;display:inline-block">👁️ Watch</a>
             </td>
             <td class="mac-text">${d.mac || "—"}</td>
-            <td>${d.os || <span class="text-dim">?</span>}</td>
+            <td>${d.os && d.os !== 'Scanning...' ? d.os : d.os === 'Scanning...' && (d.ports?.length > 0) ? '<span class="text-yellow">⏳ Scanning...</span>' : '<span class="text-dim">Unknown</span>'}</td>
             <td>
                 <div class="risk-score-wrap">
                     <div class="risk-score-bar"><div class="risk-score-fill" style="width:${score}%;background:${color}"></div></div>
@@ -325,6 +367,7 @@ socket.on("scan_complete", (data) => {
         if (badge) badge.textContent = "WiFi: " + data.subnet;
     }
     updateDeviceTable(devices);
+    scanTotal = devices.length;
     const now = new Date().toLocaleTimeString();
     const threatCount = devices.reduce((s, d) => s + (d.threats?.length || 0), 0);
     const vulnCount   = devices.reduce((s, d) => s + (d.vulns?.length  || 0), 0);
@@ -334,9 +377,10 @@ socket.on("scan_complete", (data) => {
     setStatValue("total-threats", threatCount);
     setStatValue("total-vulns",   vulnCount);
     setStatValue("total-ports",   devices.reduce((s, d) => s + (d.ports?.length || 0), 0));
-    if (devices.length > 0 && devices[0].comment) {
+    const topComment = devices.find(d => d.comment);
+    if (topComment) {
         const ai = document.getElementById("ai-comment");
-        if (ai) ai.textContent = "🤖 AI: " + devices[0].comment;
+        if (ai) ai.textContent = "🤖 AI: " + topComment.comment;
     }
     log(`✔ Scan complete — ${devices.length} device(s) found`, "success");
 });
@@ -407,7 +451,6 @@ function triggerScan() {
     fetch("/api/scan")
         .then(r => r.json())
         .then(() => {
-            hideSpinner();
             log("✔ Scan started — results will appear via live updates...", "success");
         })
         .catch(err => {
@@ -500,6 +543,77 @@ function triggerTshark() {
         });
 }
 
+function triggerJohn() {
+    const ip = prompt("Enter target IP for John the Ripper analysis:");
+    if (!ip) return;
+    log(`🔑 John the Ripper started on ${ip}`, "tool");
+    fetch(`/api/john?ip=${encodeURIComponent(ip)}`)
+        .then(r => r.json())
+        .then(data => {
+            const findings = data.findings || data;
+            if (findings.length) {
+                findings.forEach(f => addAlert(`John [${ip}]: ${f}`, "HIGH"));
+                log(`🔑 John done — ${findings.length} finding(s) on ${ip}`, "warn");
+            } else {
+                log(`🔑 John done — no findings on ${ip}`, "success");
+            }
+        })
+        .catch(err => log(`John error: ${err}`, "error"));
+}
+
+
+function triggerIPv6Scan() {
+    log("🔓 IPv6 bypass scan started...", "tool");
+    const btn = document.querySelector('[onclick="triggerIPv6Scan()"]');
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Scanning..."; }
+    fetch("/api/ipv6_scan")
+        .then(r => r.json())
+        .then(data => {
+            const withPorts = data.filter(d => d.ports && d.ports.length > 0);
+            log("✔ IPv6 scan done: " + data.length + " reachable, " + withPorts.length + " with open ports", "success");
+            if (btn) { btn.disabled = false; btn.textContent = "🔓 IPv6 Bypass"; }
+            withPorts.forEach(d => {
+                log("[IPv6] " + (d.ipv4 || d.ipv6) + " (" + d.mac + ") ports=" + d.ports.join(","), "warn");
+                addAlert("IPv6 bypass: " + (d.ipv4 || d.ipv6) + " has open ports " + d.ports.join(","), "HIGH");
+            });
+            // Reload device table
+            fetch("/api/scan_results").then(r=>r.json()).then(results => {
+                const devices = results.map(r => r.data).filter(d => d && d.ip);
+                if (devices.length) updateDeviceTable(devices);
+            });
+        })
+        .catch(err => {
+            log("IPv6 scan error: " + err, "error");
+            if (btn) { btn.disabled = false; btn.textContent = "🔓 IPv6 Bypass"; }
+        });
+}
+
+function triggerPassiveHarvest() {
+    log("🕵️ Passive Intel harvest started (30s)...", "tool");
+    const btn = document.querySelector('[onclick="triggerPassiveHarvest()"]');
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Harvesting..."; }
+    fetch("/api/passive_intel/harvest?timeout=30")
+        .then(r => r.json())
+        .then(data => {
+            log(`✔ Passive harvest done: ${data.harvested} device(s) identified, ${data.enriched} enriched`, "success");
+            if (btn) { btn.disabled = false; btn.textContent = "🕵️ Passive Intel"; }
+            // Reload device table with enriched data
+            fetch("/api/scan_results").then(r => r.json()).then(results => {
+                const devices = results.map(r => r.data).filter(d => d && d.ip);
+                if (devices.length) updateDeviceTable(devices);
+            });
+            // Show what we found
+            const intel = data.intel || {};
+            Object.values(intel).forEach(d => {
+                if (d.hostname) log(`🔍 ${d.ip || d.mac} → ${d.hostname} [${d.device_type || ""}] via ${(d.sources||[]).join("+")}`, "success");
+            });
+        })
+        .catch(err => {
+            log(`Passive harvest error: ${err}`, "error");
+            if (btn) { btn.disabled = false; btn.textContent = "🕵️ Passive Intel"; }
+        });
+}
+
 function generateReport() {
     log("📄 Generating report...", "info");
     fetch("/api/report")
@@ -525,31 +639,39 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
 
-    fetch("/api/scan_results")
-        .then(r => r.json())
-        .then(results => {
-            const devices = results.map(r => r.data);
+    Promise.all([
+        fetch("/api/scan_results").then(r => r.json()),
+        fetch("/api/alerts").then(r => r.json())
+    ]).then(([results, alerts]) => {
+        const devices = results.map(r => r.data).filter(d => d && d.ip);
+        const macs = [...new Set(devices.map(d => d.mac).filter(Boolean))];
+        const ouiP = macs.length
+            ? fetch("/api/oui?macs=" + macs.join(",")).then(r => r.json()).then(m => { _OUI_MAP = m; })
+            : Promise.resolve();
+        ouiP.then(() => {
             if (devices.length) {
                 updateDeviceTable(devices);
-                const threatCount = devices.reduce((s, d) => s + (d.threats?.length || 0), 0);
-                const vulnCount   = devices.reduce((s, d) => s + (d.vulns?.length  || 0), 0);
-                const portCount   = devices.reduce((s, d) => s + (d.ports?.length  || 0), 0);
+                const tc = devices.reduce((s,d) => s+(d.threats?.length||0),0);
+                const vc = devices.reduce((s,d) => s+(d.vulns?.length||0),0);
+                const pc = devices.reduce((s,d) => s+(d.ports?.length||0),0);
                 setStatValue("total-devices", devices.length);
-                setStatValue("total-threats", threatCount);
-                setStatValue("total-vulns",   vulnCount);
-                setStatValue("total-ports",   portCount);
+                setStatValue("total-threats", tc);
+                setStatValue("total-vulns",   vc);
+                setStatValue("total-ports",   pc);
+                const top = devices.find(d => d.comment);
+                if (top) { const ai = document.getElementById("ai-comment"); if (ai) ai.textContent = "\u{1F916} AI: " + top.comment; }
+                const now = new Date().toLocaleTimeString();
+                pushChart(deviceChart, now, devices.length);
+                pushChart(threatChart, now, tc);
             }
-            fetch("/api/alerts")
-                .then(r => r.json())
-                .then(alerts => {
-                    setStatValue("total-alerts", alerts.length);
-                    const feed = document.getElementById("alert-feed");
-                    if (!feed) return;
-                    if (!alerts.length) {
-                        feed.innerHTML = '<div class="empty-state"><div class="empty-icon">🛡️</div>No alerts yet...</div>';
-                    } else {
-                        alerts.slice(0, 20).forEach(a => addAlert(a.alert, a.severity));
-                    }
-                });
+            setStatValue("total-alerts", alerts.length);
+            const feed = document.getElementById("alert-feed");
+            if (!feed) return;
+            if (!alerts.length) {
+                feed.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F6E1}\uFE0F</div>No alerts yet...</div>';
+            } else {
+                alerts.slice(0, 20).forEach(a => addAlert(a.alert, a.severity));
+            }
         });
+    }).catch(err => log("Init load error: " + err, "error"));
 });

@@ -11,8 +11,9 @@ def gobuster_scan(target, port=80):
         url = f"http{'s' if port in (443, 8443) else ''}://{target}:{port}"
         out = subprocess.check_output(
             ["gobuster", "dir", "-u", url, "-w", WORDLIST,
-             "-t", "20", "-q", "--no-error", "-o", "/dev/stdout"],
-            stderr=subprocess.DEVNULL, timeout=90, text=True
+             "-t", "20", "-q", "--no-error", "-o", "/dev/stdout",
+             "--timeout", "5s"],
+            stderr=subprocess.DEVNULL, timeout=30, text=True
         )
         for line in out.splitlines():
             line = line.strip()

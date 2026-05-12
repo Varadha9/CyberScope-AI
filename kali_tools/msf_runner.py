@@ -54,7 +54,7 @@ def msf_check(target, open_ports):
     try:
         out = subprocess.check_output(
             ["msfconsole", "-q", "-r", rc_path],
-            stderr=subprocess.DEVNULL, timeout=120, text=True
+            stderr=subprocess.DEVNULL, timeout=45, text=True
         )
         for line in out.splitlines():
                 line = strip_ansi(line).strip()

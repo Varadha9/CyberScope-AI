@@ -1,7 +1,7 @@
 # 🔭 CyberScope AI
 
 > **Real-time WiFi Network Security Monitor & Vulnerability Scanner**  
-> Built on Kali Linux · Powered by 20+ Security Tools · Live WebSocket Dashboard
+> Built on Kali Linux · Powered by 20+ Security Tools · Live WebSocket Dashboard · Camera Intelligence
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.x-green)
@@ -19,6 +19,7 @@ Most home users, small offices, and college networks have **zero visibility** in
 - Which devices are running dangerous or exposed services
 - Whether any device has a known vulnerability that can be exploited
 - If someone is running a rogue server, database, or remote access tool on the network
+- Whether IP cameras on the network are accessible or exploitable
 
 Traditional security tools like Nmap, Nikto, and Metasploit are **powerful but complex** — they require deep command-line knowledge, manual execution, and separate interpretation of results. There is no unified, real-time, beginner-friendly interface that combines all of them.
 
@@ -38,26 +39,28 @@ CyberScope AI is an **automated WiFi network security monitoring system** that:
 6. Uses an AI behavior engine to classify each device
 7. Streams all results live to a browser dashboard via WebSockets
 8. Stores all findings in a database and generates exportable reports
-
-It is designed to work **out of the box** — just run one command and open your browser.
+9. Detects and streams live footage from IP cameras on the network
+10. Performs MITM attacks to intercept and crack camera credentials
 
 ---
 
 ## ✨ Features
 
 ### 🔍 Network Discovery
-- **ARP Scanning** via Scapy — sends ARP requests to every IP in the subnet and collects responses
-- **ARPing Runner** — alternative ARP-based host discovery using `arping`
-- **Netdiscover** — passive/active ARP-based host discovery as a secondary sweep
-- **Nmap Ping Scan** — fallback when ARP is blocked (client isolation networks)
-- **Gateway Detection** — always includes the router even if ARP is blocked
-- **Auto subnet detection** — reads `wlan0` IP and computes `/24` subnet automatically
+- **ARP Scanning** via Scapy — sends ARP requests to every IP in the subnet
+- **ARPing Runner** — alternative ARP-based host discovery
+- **Netdiscover** — passive/active ARP-based host discovery
+- **Nmap Ping Scan** — fallback when ARP is blocked
+- **Gateway Detection** — always includes the router
+- **Auto subnet detection** — reads `wlan0` IP and computes `/24` subnet
 - **Auto DB reset** — detects when you switch WiFi networks and clears stale data
+- **Passive Intelligence Harvest** — continuous DHCP/mDNS/NetBIOS sniffing for device enrichment
+- **IPv6 Bypass Scanner** — bypasses client isolation using IPv6 link-local addresses
 
 ### ⚡ Fast Port Scanning
-- Scans **top 1000 ports** per device using Nmap with `-T4` (aggressive timing)
-- Runs in sequence per device, results pushed to dashboard immediately
-- Identifies open TCP ports for further analysis
+- Scans **top 1000 ports** per device using Nmap with `-T4`
+- Smart scanner with IPv6 bypass for client-isolated networks
+- Results pushed to dashboard immediately
 
 ### 🚨 Threat Detection
 - Checks every open port against a **threat intelligence database**
@@ -67,63 +70,89 @@ It is designed to work **out of the box** — just run one command and open your
 
 ### 🤖 AI Behavior Analysis
 - Analyzes the combination of open ports on each device
-- Classifies device behavior into categories (web server, database, malware beacon, stealth, etc.)
+- Classifies device behavior (web server, database, malware beacon, stealth, etc.)
 - Generates a natural language comment for each device
 - Updates in real-time as deep scan results arrive
 
 ### 🔬 Deep Scan Engine (Background Threads)
-Runs in parallel background threads per device — does not block the UI:
-- **Service & Version Detection** — `nmap -sV` identifies exact software and version on each port
-- **OS Fingerprinting** — `nmap -O` detects the operating system (Windows 11, Linux, Android, etc.)
-- **Vulnerability Scripts** — `nmap --script vuln` checks for known CVEs and exploitable conditions
-- **Nikto Web Scanner** — scans HTTP/HTTPS ports for web vulnerabilities, missing headers, CVEs
-- **Metasploit Auxiliary Scanners** — runs `msfconsole` auxiliary modules per open port
-- **SSLScan** — detects weak SSL/TLS ciphers, expired certificates, POODLE/BEAST/HEARTBLEED
-- **WhatWeb** — fingerprints web technologies, CMS, frameworks, and server versions
-- **SearchSploit** — searches Exploit-DB for known exploits matching detected services
-- **Enum4Linux** — enumerates SMB shares, users, groups, and policies on Windows/Samba hosts
-- **DNSRecon** — performs DNS enumeration, zone transfers, and subdomain discovery
-- **Fierce** — DNS reconnaissance and network range discovery
-- **WPScan** — WordPress vulnerability scanner for themes, plugins, and user enumeration
-- **SQLMap** — automated SQL injection detection and exploitation on web endpoints
-- **Gobuster** — directory and file brute-forcing on web servers
-- **WFuzz** — web application fuzzer for parameter and path discovery
-- **Hydra** — online password brute-force for SSH, FTP, HTTP, and other services
-- **John the Ripper** — offline hash cracking using rockyou wordlist; auto-grabs hashes from exposed MySQL and SMB services
-- **Netcat** — banner grabbing and raw TCP/UDP service probing
-- **TCPDump** — low-level packet capture and traffic analysis per host
-- **TShark** — Wireshark CLI for deep packet inspection and protocol dissection
+- **Service & Version Detection** — `nmap -sV`
+- **OS Fingerprinting** — `nmap -O` + passive fingerprinting
+- **Vulnerability Scripts** — `nmap --script vuln`
+- **Nikto Web Scanner** — HTTP/HTTPS vulnerability scanning
+- **Metasploit Auxiliary Scanners** — `msfconsole` per open port
+- **SSLScan** — weak SSL/TLS cipher and certificate detection
+- **WhatWeb** — web technology and CMS fingerprinting
+- **SearchSploit** — Exploit-DB CVE matching
+- **Enum4Linux** — SMB/Samba enumeration
+- **DNSRecon** — DNS enumeration and zone transfers
+- **Fierce** — DNS recon and network range discovery
+- **WPScan** — WordPress vulnerability scanner
+- **SQLMap** — SQL injection detection
+- **Gobuster** — web directory brute-forcing
+- **WFuzz** — web application fuzzer
+- **Hydra** — online password brute-force
+- **John the Ripper** — offline hash cracking
+- **Netcat** — banner grabbing
+- **TCPDump** — packet capture per host
+- **TShark** — deep packet inspection
+- **NVD CVE Lookup** — real-time CVE scoring via NVD API
 
-### ⚡ Masscan Integration
-- Ultra-fast port discovery across the entire subnet
-- Can scan all 65535 ports across the whole `/24` in seconds
-- Results pushed live to the dashboard
+### 📷 Camera Intelligence (NEW)
+- **Auto-detection** of IP cameras on the network (Hikvision, Dahua, Axis, etc.)
+- **Live MJPEG stream** — pulls RTSP feed via ffmpeg and serves it directly in the browser (no plugins needed)
+- **RTSP path probe** — automatically discovers working stream URLs across 7 known paths
+- **Snapshot capture** — grabs JPEG frames via ISAPI endpoints
+- **Credential brute force** — tries 24+ Hikvision default passwords automatically
+- **CVE-2021-36260** — unauthenticated RCE check
+- **CVE-2017-7921** — authentication bypass check
+- **MITM hash intercept** — ARP spoofs the camera, captures Digest auth hash when someone logs in, cracks it with hashcat/john
+- **Device info extraction** — model, serial number, firmware version via ISAPI
+- **Snapshot gallery** — saves and displays all captured frames with download links
 
-### 📡 Live Packet Sniffer
-- Captures live packets on `wlan0` using Scapy
-- Displays source IP, destination IP, ports, and protocol
-- Configurable packet count
+### 📡 Live Traffic Watcher (NEW)
+- Per-device traffic monitoring with connection table
+- Direction (IN/OUT), remote host, port, protocol, app classification
+- Geo-IP enrichment — country flags, suspicious country detection
+- Beacon detection — identifies periodic C2-style connections
+- HTTP URL capture (requires MITM for HTTPS)
+- Traffic timeline and protocol breakdown charts
+- CSV export of all captured connections
+
+### 🔓 MITM / ARP Spoofing (NEW)
+- One-click ARP spoof per device from the Watch page
+- Auto-MITM on persistent ghost devices (no open ports)
+- IP forwarding management
+- Stop/start controls with live status
+
+### 🌐 Recon Page (NEW)
+- WiFi AP scanner — detects all nearby access points
+- Evil Twin / rogue AP detection
+- DNS subnet logger — captures all DNS queries on the network
+- Passive intelligence dashboard
+
+### 🗺️ Network Map (NEW)
+- Visual topology map of all discovered devices
+- Color-coded by threat level
+- Click any device to go to its detail page
 
 ### 📊 Real-time Dashboard
-- **WebSocket-powered** — all scan results stream live to the browser, no page refresh needed
-- Device table updates in real-time as each scan phase completes
-- Live activity log showing every tool running in the background
+- **WebSocket-powered** — all results stream live, no page refresh
+- Device table with IP, MAC, OS, Open Ports, Threats, Vulns, AI Comment
+- Live activity log showing every tool running
 - Threat alerts feed with color-coded severity
-- Charts for device count and threat levels over time
-- Loading spinner during active scans
-- Dedicated pages for Alerts, Device Detail, Network Map, and Reports
+- Charts for device count and threat levels
+- Stats bar: Devices, Alerts, Open Ports, Threats, Vulns
 
 ### 💾 Persistent Storage
-- SQLite database stores all devices, alerts, and scan results
-- Deduplication on alerts — same alert never stored twice
-- Upsert on scan results — always shows latest data per device
-- One-click database clear via dashboard button
+- SQLite database — devices, alerts, scan results
+- Deduplication on alerts
+- Upsert on scan results
+- One-click database clear
 
 ### 📄 Report Generation
-- Exports full scan summary as a **CSV file**
-- Includes all devices, open ports, OS, threats, vulns, MSF findings
-- JSON summary with totals for devices, alerts, high-risk findings
-- Dedicated Reports page in the dashboard UI
+- CSV export with all devices, ports, OS, threats, vulns, MSF findings
+- JSON summary with totals
+- Dedicated Reports page
 
 ---
 
@@ -131,68 +160,85 @@ Runs in parallel background threads per device — does not block the UI:
 
 ```
 CyberScope-AI/
-├── app.py                    # Flask app, API routes, scan orchestration, WebSocket events
-├── run.sh                    # Launch script (kills port 5000, sets PYTHONPATH, runs with sudo)
-├── requirements.txt          # Python dependencies
+├── app.py                        # Flask app, API routes, scan orchestration, WebSocket
+├── run.sh                        # Launch script
+├── requirements.txt              # Python dependencies
 │
 ├── scanner/
-│   ├── device_scanner.py     # ARP scan (Scapy), nmap ping fallback, gateway detection, subnet detection
-│   └── port_scanner.py       # Nmap top-1000 TCP port scanner
+│   ├── device_scanner.py         # ARP scan, nmap ping fallback, subnet detection
+│   └── port_scanner.py           # Nmap top-1000 TCP port scanner
 │
 ├── threat/
-│   └── detector.py           # Port-to-threat mapping with CRITICAL/HIGH/MEDIUM/LOW severity
+│   └── detector.py               # Port-to-threat mapping
 │
 ├── ai/
-│   ├── behavior_analyzer.py  # Classifies device behavior from open port combinations
-│   └── comment_engine.py     # Generates human-readable AI comments per behavior type
+│   ├── behavior_analyzer.py      # Device behavior classification
+│   └── comment_engine.py         # AI comment generation
 │
 ├── kali_tools/
-│   ├── nmap_advanced.py      # OS detection (-O), service scan (-sV), vuln scripts (--script vuln)
-│   ├── masscan_runner.py     # Fast full-subnet port discovery via masscan
-│   ├── nikto_runner.py       # Web vulnerability scanner — CVEs, missing headers, misconfigs
-│   ├── msf_runner.py         # Metasploit auxiliary scanner — msfconsole RC scripts per port
-│   ├── netdiscover_runner.py # ARP-based passive/active host discovery
-│   ├── arping_runner.py      # ARP ping host discovery using arping
-│   ├── sslscan_runner.py     # SSL/TLS cipher and certificate weakness detection
-│   ├── whatweb_runner.py     # Web technology and CMS fingerprinting
-│   ├── searchsploit_runner.py# Exploit-DB search for known CVEs matching services
-│   ├── enum4linux_runner.py  # SMB/Samba enumeration — shares, users, groups
-│   ├── dnsrecon_runner.py    # DNS enumeration, zone transfers, subdomain discovery
-│   ├── fierce_runner.py      # DNS recon and network range discovery
-│   ├── wpscan_runner.py      # WordPress vulnerability scanner
-│   ├── sqlmap_runner.py      # SQL injection detection and exploitation
-│   ├── gobuster_runner.py    # Web directory and file brute-forcing
-│   ├── wfuzz_runner.py       # Web application fuzzer
-│   ├── hydra_runner.py       # Online password brute-force (SSH, FTP, HTTP, etc.)
-│   ├── john_runner.py        # Offline hash cracking — rockyou wordlist, auto hash grab from MySQL/SMB
-│   ├── netcat_runner.py      # Banner grabbing and raw service probing
-│   ├── tcpdump_runner.py     # Low-level packet capture per host
-│   └── tshark_runner.py      # Deep packet inspection via TShark/Wireshark CLI
+│   ├── nmap_advanced.py          # OS detection, service scan, vuln scripts
+│   ├── masscan_runner.py         # Fast full-subnet port discovery
+│   ├── nikto_runner.py           # Web vulnerability scanner
+│   ├── msf_runner.py             # Metasploit auxiliary scanners
+│   ├── netdiscover_runner.py     # ARP-based host discovery
+│   ├── arping_runner.py          # ARP ping discovery
+│   ├── sslscan_runner.py         # SSL/TLS weakness detection
+│   ├── whatweb_runner.py         # Web tech fingerprinting
+│   ├── searchsploit_runner.py    # Exploit-DB CVE search
+│   ├── enum4linux_runner.py      # SMB/Samba enumeration
+│   ├── dnsrecon_runner.py        # DNS enumeration
+│   ├── fierce_runner.py          # DNS recon
+│   ├── wpscan_runner.py          # WordPress scanner
+│   ├── sqlmap_runner.py          # SQL injection detection
+│   ├── gobuster_runner.py        # Web directory brute-force
+│   ├── wfuzz_runner.py           # Web fuzzer
+│   ├── hydra_runner.py           # Password brute-force
+│   ├── john_runner.py            # Hash cracking
+│   ├── netcat_runner.py          # Banner grabbing
+│   ├── tcpdump_runner.py         # Packet capture
+│   ├── tshark_runner.py          # Deep packet inspection
+│   ├── hikvision_scanner.py      # Hikvision camera CVE scanner + brute force
+│   ├── rtsp_proxy.py             # RTSP → MJPEG proxy (live browser stream via ffmpeg)
+│   ├── cam_interceptor.py        # MITM hash capture + hashcat/john cracking
+│   ├── arp_spoof.py              # ARP spoofing engine
+│   ├── traffic_watcher.py        # Per-device traffic analysis + beacon detection
+│   ├── dns_logger.py             # DNS query capture
+│   ├── geo_ip.py                 # Geo-IP enrichment
+│   ├── cve_lookup.py             # NVD API CVE lookup
+│   ├── wifi_scanner.py           # WiFi AP scanner + evil twin detection
+│   ├── os_fingerprint.py         # Passive OS fingerprinting
+│   ├── passive_intel.py          # DHCP/mDNS/NetBIOS passive harvest
+│   ├── smart_scanner.py          # Client isolation detection + smart scan
+│   └── ipv6_scanner.py           # IPv6 device discovery + port scan
 │
 ├── sniffer/
-│   └── packet_sniffer.py     # Live packet capture on wlan0 using Scapy
+│   └── packet_sniffer.py         # Live packet capture via Scapy
 │
 ├── database/
-│   └── models.py             # SQLite — devices, alerts, scan_results with upsert + dedup logic
+│   └── models.py                 # SQLite — devices, alerts, scan_results
 │
 ├── reports/
-│   └── generator.py          # CSV report + JSON summary generator
+│   └── generator.py              # CSV + JSON report generator
 │
 ├── static/
-│   ├── app.js                # WebSocket client, live UI updates, chart rendering, all button logic
-│   └── style.css             # Hacker-themed dark dashboard styles
+│   ├── app.js                    # WebSocket client, live UI, charts
+│   └── style.css                 # Hacker-themed dark dashboard
 │
 ├── templates/
-│   ├── dashboard.html        # Main web dashboard (single page)
-│   ├── alerts.html           # Dedicated alerts view page
-│   ├── device.html           # Per-device detail page
-│   ├── map.html              # Network topology map page
-│   └── reports.html          # Reports and export page
+│   ├── dashboard.html            # Main live scan dashboard
+│   ├── alerts.html               # Threat alerts feed
+│   ├── device.html               # Per-device deep scan results
+│   ├── map.html                  # Network topology map
+│   ├── cameras.html              # Camera intelligence + live stream viewer
+│   ├── watch.html                # Per-device live traffic watcher
+│   ├── recon.html                # WiFi recon + DNS logger
+│   ├── activity.html             # Network-wide activity monitor
+│   └── reports.html              # Reports and export
 │
 └── logs/
-    ├── cyberscope.db         # SQLite database (auto-created)
-    ├── .last_subnet          # Stores last known subnet for change detection
-    └── report_*.csv          # Auto-generated scan reports
+    ├── cyberscope.db             # SQLite database (auto-created)
+    ├── .last_subnet              # Last known subnet for change detection
+    └── report_*.csv              # Auto-generated scan reports
 ```
 
 ---
@@ -227,13 +273,16 @@ CyberScope-AI/
 | `netcat-openbsd` | Banner grabbing / raw probing | `sudo apt install netcat-openbsd` |
 | `tcpdump` | Packet capture | `sudo apt install tcpdump` |
 | `tshark` | Deep packet inspection | `sudo apt install tshark` |
+| `ffmpeg` | RTSP → MJPEG camera stream proxy | `sudo apt install ffmpeg` |
+| `arpspoof` | ARP spoofing for MITM | `sudo apt install dsniff` |
+| `hashcat` | GPU hash cracking | `sudo apt install hashcat` |
 | `python3` | Runtime | Pre-installed |
 
 Install all at once:
 ```bash
 sudo apt update && sudo apt install nmap masscan nikto metasploit-framework netdiscover \
   sslscan whatweb exploitdb enum4linux dnsrecon fierce wpscan sqlmap gobuster wfuzz \
-  hydra john netcat-openbsd tcpdump tshark -y
+  hydra john netcat-openbsd tcpdump tshark ffmpeg dsniff hashcat -y
 ```
 
 ### Python Dependencies
@@ -243,6 +292,8 @@ flask
 flask-socketio
 scapy
 python-nmap
+requests
+urllib3
 ```
 
 Install:
@@ -256,7 +307,7 @@ pip install -r requirements.txt
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/varad-comrad/CyberScope-AI.git
+git clone https://github.com/Varadha9/CyberScope-AI.git
 cd CyberScope-AI
 ```
 
@@ -264,7 +315,7 @@ cd CyberScope-AI
 ```bash
 sudo apt update && sudo apt install nmap masscan nikto metasploit-framework netdiscover \
   sslscan whatweb exploitdb enum4linux dnsrecon fierce wpscan sqlmap gobuster wfuzz \
-  hydra john netcat-openbsd tcpdump tshark -y
+  hydra john netcat-openbsd tcpdump tshark ffmpeg dsniff hashcat -y
 ```
 
 ### 3. Install Python dependencies
@@ -277,7 +328,7 @@ pip install -r requirements.txt
 sudo bash run.sh
 ```
 
-> **Root privileges are required** — Scapy ARP scanning and Nmap OS fingerprinting need raw socket access.
+> **Root privileges are required** — Scapy ARP scanning, Nmap OS fingerprinting, and ARP spoofing need raw socket access.
 
 ### 5. Open the dashboard
 ```
@@ -293,16 +344,32 @@ The background scan starts automatically on launch. The dashboard will populate 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Live dashboard UI |
-| `/api/scan` | GET | Trigger full network scan (fast + deep) |
+| `/api/scan` | GET | Trigger full network scan |
 | `/api/masscan` | GET | Run masscan across WiFi subnet |
-| `/api/sniff` | GET | Capture live packets (`?count=N`, default 30) |
-| `/api/devices` | GET | List all discovered devices from DB |
-| `/api/alerts` | GET | List all security alerts from DB |
-| `/api/scan_results` | GET | List latest scan results per device |
-| `/api/report` | GET | Generate and save CSV report |
-| `/api/subnet` | GET | Get current detected WiFi subnet |
-| `/api/john` | GET | Crack hashes on target (`?target=IP&ports=22,3306`) |
-| `/api/clear_db` | POST | Wipe all devices, alerts, scan results |
+| `/api/sniff` | GET | Capture live packets (`?count=N`) |
+| `/api/devices` | GET | List all discovered devices |
+| `/api/alerts` | GET | List all security alerts |
+| `/api/scan_results` | GET | Latest scan results per device |
+| `/api/report` | GET | Generate CSV report |
+| `/api/subnet` | GET | Current detected WiFi subnet |
+| `/api/cameras` | GET | List detected IP cameras |
+| `/api/camera/stream/<ip>` | GET | Live MJPEG stream from camera (`?user=&pass=`) |
+| `/api/camera/snapshot` | GET | Capture JPEG snapshot (`?ip=&user=&pass=`) |
+| `/api/camera/probe/<ip>` | GET | Find working RTSP URL (`?user=&pass=`) |
+| `/api/camera/brute` | GET | Brute force camera credentials (`?ip=`) |
+| `/api/camera/test_creds` | GET | Test camera credentials |
+| `/api/camera/intercept/<ip>` | GET | Start MITM hash capture on camera |
+| `/api/hikvision/<ip>` | GET | Full Hikvision CVE assessment |
+| `/api/watch/<ip>` | GET | Per-device traffic capture |
+| `/api/spoof/start/<ip>` | GET | Start ARP spoof on device |
+| `/api/spoof/stop/<ip>` | GET | Stop ARP spoof |
+| `/api/spoof/status` | GET | List active spoofs |
+| `/api/wifi_scan` | GET | Scan WiFi APs + detect evil twins |
+| `/api/dns/<ip>` | GET | Capture DNS queries from device |
+| `/api/passive_intel/harvest` | GET | Trigger passive intelligence harvest |
+| `/api/ipv6_scan` | GET | IPv6 bypass scan |
+| `/api/john` | GET | Crack hashes (`?target=IP&ports=22,3306`) |
+| `/api/clear_db` | POST | Wipe all data |
 
 ---
 
@@ -310,68 +377,82 @@ The background scan starts automatically on launch. The dashboard will populate 
 
 | Page | Route | Description |
 |------|-------|-------------|
-| **Dashboard** | `/` | Main live scan view — devices, stats, activity log |
-| **Alerts** | `/alerts` | Full threat alerts feed with filtering |
-| **Device Detail** | `/device/<ip>` | Per-device deep scan results and findings |
-| **Network Map** | `/map` | Visual network topology map |
-| **Reports** | `/reports` | Export and view generated scan reports |
+| **Dashboard** | `/` | Main live scan view |
+| **Alerts** | `/alerts` | Full threat alerts feed |
+| **Device Detail** | `/device/<ip>` | Per-device deep scan results |
+| **Network Map** | `/map` | Visual network topology |
+| **Cameras** | `/cameras` | IP camera viewer + live stream |
+| **Watch** | `/watch/<ip>` | Per-device live traffic monitor |
+| **Recon** | `/recon` | WiFi AP scan + DNS logger |
+| **Activity** | `/activity` | Network-wide activity monitor |
+| **Reports** | `/reports` | Export and view reports |
 
 ---
 
-## 🔄 How It Works — Full Scan Flow
+## 📷 Camera Intelligence — How It Works
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              CAMERA DETECTION                           │
+│  Scan results checked for: Hikvision MAC, ports 554/    │
+│  8000/9010, hostname keywords (hik, nvr, cam, dahua)    │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│              CREDENTIAL DISCOVERY                       │
+│  ├── Brute force 24+ default passwords (Digest auth)    │
+│  ├── CVE-2017-7921 auth bypass check                    │
+│  ├── CVE-2021-36260 unauthenticated RCE check           │
+│  └── MITM: ARP spoof → capture Digest hash → hashcat   │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│              LIVE STREAM                                │
+│  ffprobe probes 7 RTSP paths to find working URL        │
+│  ffmpeg pulls RTSP → encodes as MJPEG → Flask streams   │
+│  Browser receives multipart/x-mixed-replace             │
+│  <img src="/api/camera/stream/IP"> = live video         │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🔄 Full Scan Flow
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    APP STARTUP                          │
 │  1. Detect wlan0 IP → compute /24 subnet                │
 │  2. Compare with last known subnet                      │
-│  3. If subnet changed → clear DB (new network)          │
-│  4. Start background scan thread (every 10 minutes)     │
+│  3. If subnet changed → clear DB                        │
+│  4. Start background scan thread (every 30 minutes)     │
+│  5. Start continuous passive harvest (every 45s)        │
 └────────────────────────┬────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────┐
 │                  DEVICE DISCOVERY                       │
-│  ARP Scan (Scapy) ──► finds devices by MAC+IP           │
-│  ARPing Runner ─────► alternative ARP discovery         │
-│       │ if blocked                                      │
-│  Nmap Ping Scan ────► fallback host discovery           │
-│       │ if still empty                                  │
-│  Gateway Detection ─► at least return the router        │
-│  Netdiscover ───────► secondary ARP sweep               │
-│  Filter 0.0.0.0 / 127.0.0.1 / invalid IPs              │
+│  ARP Scan (Scapy) + ARPing + Netdiscover                │
+│  Nmap Ping Scan fallback                                │
+│  Gateway Detection                                      │
+│  IPv6 NDP table lookup                                  │
+│  Passive Intel (DHCP/mDNS/NetBIOS)                      │
 └────────────────────────┬────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────┐
-│              FAST SCAN (per device, sequential)         │
-│  Nmap top-1000 TCP ports (-T4)                          │
-│  Threat detection on open ports                         │
-│  AI behavior classification                             │
+│              FAST SCAN (per device)                     │
+│  Smart port scan (IPv6 bypass if client isolation)      │
+│  Threat detection → AI behavior classification          │
 │  Save to DB → emit to dashboard via WebSocket           │
 └────────────────────────┬────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────┐
-│           DEEP SCAN (per device, parallel threads)      │
-│  ├── nmap -sV         → service & version detection     │
-│  ├── nmap -O          → OS fingerprinting               │
-│  ├── nmap --script vuln → CVE checks                    │
-│  ├── nikto            → web vulnerability scan          │
-│  ├── msfconsole       → auxiliary scanners per port     │
-│  ├── sslscan          → SSL/TLS weakness detection      │
-│  ├── whatweb          → web tech fingerprinting         │
-│  ├── searchsploit     → Exploit-DB CVE matching         │
-│  ├── enum4linux       → SMB/Samba enumeration           │
-│  ├── dnsrecon         → DNS enumeration                 │
-│  ├── fierce           → DNS recon                       │
-│  ├── wpscan           → WordPress vuln scan             │
-│  ├── sqlmap           → SQL injection detection         │
-│  ├── gobuster         → web directory brute-force       │
-│  ├── wfuzz            → web fuzzing                     │
-│  ├── hydra            → password brute-force            │
-│  ├── john             → offline hash cracking           │
-│  ├── netcat           → banner grabbing                 │
-│  ├── tcpdump          → packet capture per host         │
-│  └── tshark           → deep packet inspection          │
-│  All results → save to DB → push live to dashboard      │
+│           DEEP SCAN (parallel background threads)       │
+│  nmap -sV / -O / --script vuln                          │
+│  nikto / whatweb / wpscan / sqlmap / gobuster / wfuzz   │
+│  sslscan / msf / hydra / john / enum4linux              │
+│  searchsploit / netcat / NVD CVE lookup                 │
+│  Hikvision CVE scan (if camera ports detected)          │
+│  All results → DB → live WebSocket push                 │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -381,10 +462,10 @@ The background scan starts automatically on launch. The dashboard will populate 
 
 | Severity | Ports | Risk |
 |----------|-------|------|
-| 🔴 CRITICAL | 23 (Telnet), 445 (SMB), 3389 (RDP), 4444 (Metasploit), 27017 (MongoDB) | Direct exploitation possible, ransomware vector |
+| 🔴 CRITICAL | 23 (Telnet), 445 (SMB), 3389 (RDP), 4444 (Metasploit), 27017 (MongoDB) | Direct exploitation possible |
 | 🟠 HIGH | 21 (FTP), 135 (MSRPC), 139 (NetBIOS), 3306 (MySQL), 5900 (VNC), 6667 (IRC) | Credential theft, lateral movement |
-| 🟡 MEDIUM | 22 (SSH), 25 (SMTP), 110 (POP3), 143 (IMAP) | Brute-force risk, mail relay abuse |
-| 🟢 LOW | 53 (DNS), 80 (HTTP), 443 (HTTPS), 8080, 8443 | Information disclosure, web attacks |
+| 🟡 MEDIUM | 22 (SSH), 25 (SMTP), 110 (POP3), 143 (IMAP) | Brute-force risk |
+| 🟢 LOW | 53 (DNS), 80 (HTTP), 443 (HTTPS), 8080, 8443 | Information disclosure |
 
 ---
 
@@ -405,30 +486,16 @@ The background scan starts automatically on launch. The dashboard will populate 
 
 ---
 
-## 📊 Dashboard Panels
-
-| Panel | Description |
-|-------|-------------|
-| **Stats Bar** | Live counts — Devices, Alerts, Open Ports, Threats, Vulns |
-| **Connected Devices** | Table with IP, MAC, OS, Open Ports, Threats, Vulns, AI Comment |
-| **Background Activity Log** | Real-time terminal showing every tool running |
-| **Threat Alerts** | Color-coded feed — CRITICAL (purple), HIGH (red), MEDIUM (yellow), LOW (green) |
-| **Live Packets** | Packet sniffer output — src/dst IP, ports, protocol |
-| **Device Activity Chart** | Line chart — device count over time |
-| **Threat Levels Chart** | Bar chart — threat count over scan cycles |
-| **AI Comment** | Current AI assessment of the network |
-
----
-
 ## 🔐 Real-World Findings Example
 
 From a real scan on a home network:
 
 | Device | Finding | Severity |
 |--------|---------|----------|
-| `192.168.31.246` | HikVision NVR camera — Slowloris DOS vulnerability (CVE-2007-6750) | CRITICAL |
-| `192.168.31.104` | Windows 11 PC — SMB port 445 open, ransomware vector | CRITICAL |
-| `192.168.31.1` | Router — admin panel on port 8080 exposed, DNS open resolver risk | LOW–HIGH |
+| `192.168.31.246` | HikVision NVR — Slowloris DOS (CVE-2007-6750), RTSP stream on port 554 | CRITICAL |
+| `192.168.31.104` | Windows 11 PC — SMB port 445 open, ransomware vector, SMB v3.1.1 detected | CRITICAL |
+| `192.168.31.54` | Windows 11 PC — MySQL port 3306 open, empty password confirmed | CRITICAL |
+| `192.168.31.1` | JioFiber Router — admin panel on 8080, missing security headers, DNS open resolver | LOW–HIGH |
 
 ---
 
@@ -437,12 +504,12 @@ From a real scan on a home network:
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | Web Framework | Flask (Python) | HTTP server, API routes, template rendering |
-| Real-time Comms | Flask-SocketIO | WebSocket — push scan results live to browser |
-| Packet Crafting | Scapy | ARP scanning, packet sniffing |
+| Real-time Comms | Flask-SocketIO | WebSocket — push scan results live |
+| Packet Crafting | Scapy | ARP scanning, packet sniffing, MITM |
 | Port Scanning | Nmap + python-nmap | Fast scan, OS detection, vuln scripts |
 | Fast Discovery | Masscan | High-speed full-subnet port scan |
 | Web Vuln Scan | Nikto | HTTP/HTTPS vulnerability assessment |
-| SSL Analysis | SSLScan | TLS cipher and certificate weakness detection |
+| SSL Analysis | SSLScan | TLS cipher and certificate weakness |
 | Web Fingerprinting | WhatWeb | CMS and technology identification |
 | Exploit Search | SearchSploit | Exploit-DB CVE matching |
 | SMB Enumeration | Enum4Linux | Windows/Samba share and user enumeration |
@@ -451,14 +518,19 @@ From a real scan on a home network:
 | Injection Testing | SQLMap | Automated SQL injection detection |
 | Directory Fuzzing | Gobuster + WFuzz | Web path and parameter discovery |
 | Brute Force | Hydra | Online credential brute-forcing |
-| Hash Cracking | John the Ripper | Offline hash cracking with rockyou wordlist |
+| Hash Cracking | John the Ripper + Hashcat | Offline hash cracking |
 | Service Probing | Netcat | Raw TCP/UDP banner grabbing |
 | Packet Analysis | TCPDump + TShark | Deep traffic capture and inspection |
-| Exploitation Framework | Metasploit (msfconsole) | Auxiliary service scanners |
+| Exploitation | Metasploit (msfconsole) | Auxiliary service scanners |
 | Host Discovery | Netdiscover + ARPing | ARP-based passive/active discovery |
-| Database | SQLite | Persistent storage — devices, alerts, results |
+| Camera Streaming | ffmpeg | RTSP → MJPEG browser-compatible stream |
+| Camera CVEs | Custom scanner | CVE-2021-36260, CVE-2017-7921 |
+| MITM | arpspoof + TShark | ARP spoof + Digest hash capture |
+| Geo-IP | ip-api.com | Country and ASN enrichment |
+| CVE Scoring | NVD API | Real-time CVSS scores |
+| Database | SQLite | Persistent storage |
 | Frontend | HTML + CSS + JavaScript | Multi-page dashboard UI |
-| Charts | Chart.js | Device activity and threat level charts |
+| Charts | Chart.js | Device activity and threat charts |
 
 ---
 
@@ -474,7 +546,8 @@ From a real scan on a home network:
 ## 👨‍💻 Author
 
 **Varad**  
-CyberScope AI — Built as a network security monitoring project on Kali Linux.
+CyberScope AI — Built as a network security monitoring project on Kali Linux.  
+GitHub: [Varadha9](https://github.com/Varadha9)
 
 ---
 

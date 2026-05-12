@@ -5,7 +5,7 @@ def fierce_scan(target):
     try:
         out = subprocess.check_output(
             ["fierce", "--domain", target],
-            stderr=subprocess.DEVNULL, timeout=60, text=True
+            stderr=subprocess.DEVNULL, timeout=25, text=True
         )
         for line in out.splitlines():
             line = line.strip()

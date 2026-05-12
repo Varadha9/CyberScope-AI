@@ -5,11 +5,19 @@ def searchsploit_scan(services: dict):
     findings = []
     seen = set()
     for port, svc in services.items():
-        if not svc or svc in seen:
+        if not svc:
             continue
-        seen.add(svc)
-        # Use first 2 words of service string for better matches
-        query = " ".join(svc.split()[:2])
+        # svc is a dict: {name, product, version}
+        if isinstance(svc, dict):
+            parts = [svc.get("product", ""), svc.get("version", "")]
+            query = " ".join(p for p in parts if p).strip()
+            if not query:
+                query = svc.get("name", "").strip()
+        else:
+            query = " ".join(str(svc).split()[:2])
+        if not query or query in seen:
+            continue
+        seen.add(query)
         try:
             out = subprocess.check_output(
                 ["searchsploit", query],

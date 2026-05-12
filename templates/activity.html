@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberScope AI — Live Activity</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<nav class="sidebar">
+    <div class="sidebar-logo">
+        <div class="logo-text">⬡ CYBERSCOPE</div>
+        <div class="logo-sub">AI NETWORK SCANNER</div>
+    </div>
+    <a href="/" class="nav-item"><span class="nav-icon">🏠</span><span>Dashboard</span></a>
+    <a href="/alerts" class="nav-item"><span class="nav-icon">🔔</span><span>Alerts</span></a>
+    <a href="/map" class="nav-item"><span class="nav-icon">🗺️</span><span>Network Map</span></a>
+    <a href="/cameras" class="nav-item"><span class="nav-icon">📷</span><span>Cameras</span></a>
+    <a href="/recon" class="nav-item"><span class="nav-icon">🔍</span><span>Recon</span></a>
+    <a href="/activity" class="nav-item active"><span class="nav-icon">📡</span><span>Live Activity</span></a>
+    <a href="/reports" class="nav-item"><span class="nav-icon">📄</span><span>Reports</span></a>
+    <div class="sidebar-status"><span class="status-dot"></span><span>MONITORING</span></div>
+</nav>
+
+<div class="main-content">
+    <div class="topbar">
+        <div class="topbar-title">📡 Live Network Activity</div>
+        <div class="topbar-right">
+            <span class="topbar-badge" id="active-badge">Idle</span>
+            <span id="status-text" style="font-size:0.75rem;color:var(--text-dim);font-family:'Courier New',monospace">IDLE</span>
+            <span class="topbar-time" id="clock"></span>
+        </div>
+    </div>
+
+    <div class="page">
+
+        <!-- Controls -->
+        <div style="display:flex;gap:10px;margin-bottom:20px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" id="btn-start" onclick="startCapture()">▶ Start Capture</button>
+            <button class="btn btn-danger"  id="btn-stop"  onclick="stopCapture()" disabled>⏹ Stop</button>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:var(--text-dim)">
+                Auto-refresh every
+                <select id="interval-sel" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:4px;font-size:0.78rem">
+                    <option value="5">5s</option>
+                    <option value="10" selected>10s</option>
+                    <option value="30">30s</option>
+                </select>
+            </label>
+            <span class="text-dim" style="font-size:0.72rem" id="last-updated"></span>
+        </div>
+
+        <!-- Who is active right now -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title"><span class="dot-indicator"></span> Who is active right now?</div>
+                <span class="text-dim" style="font-size:0.72rem">Devices generating network traffic in this capture window</span>
+            </div>
+            <div id="active-devices-panel" class="panel-body">
+                <div class="empty-state"><div class="empty-icon">📡</div>Click ▶ Start Capture to see live activity</div>
+            </div>
+        </div>
+
+        <!-- Charts: Timeline + Protocol Breakdown -->
+        <div class="grid-2 section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">📈 Bytes per Device</div></div>
+                <div class="panel-body"><canvas id="bytesChart"></canvas></div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🥧 Activity Breakdown</div><span class="text-dim" style="font-size:0.72rem">By app/service type</span></div>
+                <div class="panel-body"><canvas id="actChart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- DNS Query Log -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">🔍 Subnet DNS Query Log</div>
+                <button class="btn btn-sm btn-cyan" onclick="fetchDNS()">Refresh DNS</button>
+            </div>
+            <div class="panel-body no-pad" id="dns-panel">
+                <div class="empty-state"><div class="empty-icon">🔍</div>Click Refresh DNS to capture DNS queries from all devices</div>
+            </div>
+        </div>
+
+        <!-- Per-device activity cards -->
+        <div id="device-cards"></div>
+
+    </div>
+</div>
+
+<script>
+setInterval(() => { document.getElementById("clock").textContent = new Date().toLocaleTimeString(); }, 1000);
+
+let capturing = false;
+let timer = null;
+let bytesChart, actChart;
+
+function initCharts() {
+    bytesChart = new Chart(document.getElementById("bytesChart").getContext("2d"), {
+        type: "bar",
+        data: { labels: [], datasets: [{ label: "Bytes", data: [], backgroundColor: "rgba(0,212,255,0.4)", borderColor: "#00d4ff", borderWidth: 1 }] },
+        options: { indexAxis: "y", scales: {
+            x: { ticks: { color: "#555" }, beginAtZero: true },
+            y: { ticks: { color: "#c9d1d9", font: { family: "'Courier New',monospace", size: 11 } } }
+        }, plugins: { legend: { display: false } } }
+    });
+    actChart = new Chart(document.getElementById("actChart").getContext("2d"), {
+        type: "doughnut",
+        data: { labels: [], datasets: [{ data: [], backgroundColor: ["#00d4ff","#00ff88","#ffd700","#ff4444","#bb86fc","#ff8c00","#ff00aa","#00d4aa"] }] },
+        options: { plugins: { legend: { labels: { color: "#c9d1d9", font: { size: 11 } } } } }
+    });
+}
+
+function startCapture() {
+    capturing = true;
+    document.getElementById("btn-start").disabled = true;
+    document.getElementById("btn-stop").disabled  = false;
+    document.getElementById("status-text").textContent = "CAPTURING";
+    document.getElementById("status-text").style.color = "var(--yellow)";
+    if (!bytesChart) initCharts();
+    fetchActivity();
+    scheduleNext();
+}
+
+function stopCapture() {
+    capturing = false;
+    clearTimeout(timer);
+    document.getElementById("btn-start").disabled = false;
+    document.getElementById("btn-stop").disabled  = true;
+    document.getElementById("status-text").textContent = "STOPPED";
+    document.getElementById("status-text").style.color = "var(--text-dim)";
+}
+
+function scheduleNext() {
+    if (!capturing) return;
+    const ms = parseInt(document.getElementById("interval-sel").value) * 1000;
+    timer = setTimeout(() => { fetchActivity(); scheduleNext(); }, ms);
+}
+
+function fetchActivity() {
+    document.getElementById("status-text").textContent = "CAPTURING";
+    document.getElementById("status-text").style.color = "var(--yellow)";
+    document.getElementById("active-badge").textContent = "Capturing...";
+
+    fetch("/api/activity?count=150&timeout=15")
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById("last-updated").textContent = "Updated: " + new Date().toLocaleTimeString();
+            document.getElementById("status-text").textContent = "LIVE";
+            document.getElementById("status-text").style.color = "var(--green)";
+
+            const active = data.filter(d => d.packets > 0);
+            document.getElementById("active-badge").textContent = active.length + " active device(s)";
+
+            renderActiveDevices(active);
+            renderDeviceCards(active);
+            updateCharts(active);
+        })
+        .catch(() => {
+            document.getElementById("status-text").textContent = "ERROR";
+            document.getElementById("status-text").style.color = "var(--red)";
+        });
+}
+
+function bytesLabel(b) {
+    if (b > 1024*1024) return (b/1024/1024).toFixed(1) + " MB";
+    if (b > 1024)      return (b/1024).toFixed(1) + " KB";
+    return b + " B";
+}
+
+function renderActiveDevices(devices) {
+    const el = document.getElementById("active-devices-panel");
+    if (!devices.length) {
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">💤</div>No devices are generating traffic right now — network is quiet</div>';
+        return;
+    }
+    el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:12px;padding:4px 0">` +
+        devices.map(d => {
+            const bar = Math.min(100, Math.round(d.bytes / 500));
+            return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:14px 18px;min-width:200px;flex:1;max-width:280px">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                    <a href="/watch/${d.ip}" style="color:var(--cyan);font-family:'Courier New',monospace;font-size:0.85rem;font-weight:600">${d.ip}</a>
+                    <a href="/watch/${d.ip}" class="btn btn-sm btn-cyan" style="padding:2px 8px;font-size:0.68rem">👁️ Watch</a>
+                </div>
+                <div style="height:3px;background:var(--bg);border-radius:2px;margin-bottom:8px;overflow:hidden">
+                    <div style="height:100%;width:${bar}%;background:var(--green);border-radius:2px;transition:width 0.4s"></div>
+                </div>
+                <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:6px">
+                    📦 ${d.packets} packets &nbsp;·&nbsp; 💾 ${bytesLabel(d.bytes)}
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:4px">
+                    ${d.activities.map(a => `<span style="font-size:0.7rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:2px 6px">${a}</span>`).join("")}
+                </div>
+            </div>`;
+        }).join("") + `</div>`;
+}
+
+function updateCharts(devices) {
+    if (!bytesChart || !actChart) return;
+    // Bytes per device (top 8)
+    const sorted = [...devices].sort((a,b) => b.bytes - a.bytes).slice(0, 8);
+    bytesChart.data.labels = sorted.map(d => d.ip);
+    bytesChart.data.datasets[0].data = sorted.map(d => d.bytes);
+    bytesChart.update();
+    // Activity breakdown
+    const actMap = {};
+    devices.forEach(d => d.activities.forEach(a => { actMap[a] = (actMap[a]||0) + 1; }));
+    const entries = Object.entries(actMap).sort((a,b) => b[1]-a[1]).slice(0, 8);
+    actChart.data.labels = entries.map(e => e[0]);
+    actChart.data.datasets[0].data = entries.map(e => e[1]);
+    actChart.update();
+}
+
+function fetchDNS() {
+    const el = document.getElementById("dns-panel");
+    el.innerHTML = '<div class="empty-state">Capturing DNS queries (15s)...</div>';
+    fetch("/api/dns_subnet?timeout=15")
+        .then(r => r.json())
+        .then(data => {
+            const entries = Object.entries(data);
+            if (!entries.length) {
+                el.innerHTML = '<div class="empty-state">No DNS queries captured</div>';
+                return;
+            }
+            el.innerHTML = `<table class="device-table">
+                <thead><tr><th>Device IP</th><th>Domains Queried</th></tr></thead>
+                <tbody>${entries.map(([ip, domains]) =>
+                    `<tr><td class="mono" style="color:var(--cyan);white-space:nowrap">${ip}</td>
+                    <td style="font-size:0.78rem">${domains.slice(0,20).map(d =>
+                        `<span style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:2px 7px;margin:2px;display:inline-block">${d}</span>`
+                    ).join("")}</td></tr>`
+                ).join("")}</tbody></table>`;
+        })
+        .catch(() => { el.innerHTML = '<div class="empty-state" style="color:var(--red)">DNS capture failed</div>'; });
+}
+
+function renderDeviceCards(devices) {
+    const el = document.getElementById("device-cards");
+    if (!devices.length) { el.innerHTML = ""; return; }
+
+    el.innerHTML = devices.map(d => `
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">
+                    <span class="dot-indicator"></span>
+                    <a href="/watch/${d.ip}" style="color:var(--cyan);font-family:'Courier New',monospace">${d.ip}</a>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span class="text-dim" style="font-size:0.72rem">${d.packets} packets · ${bytesLabel(d.bytes)}</span>
+                    <a href="/watch/${d.ip}" class="btn btn-sm btn-primary">👁️ Watch Live</a>
+                </div>
+            </div>
+            <div class="panel-body">
+                <div style="margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px">
+                    ${d.activities.map(a => `<span style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:0.78rem">${a}</span>`).join("")}
+                </div>
+                ${d.destinations.length ? `
+                <div style="font-size:0.72rem;color:var(--text-dim);margin-top:6px">
+                    Talking to: ${d.destinations.map(ip => `<span class="mono" style="color:var(--text);margin-right:8px">${ip}</span>`).join("")}
+                </div>` : ""}
+            </div>
+        </div>`).join("");
+}
+</script>
+</body>
+</html>

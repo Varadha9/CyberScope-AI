@@ -5,7 +5,7 @@ def dnsrecon_scan(target):
     try:
         out = subprocess.check_output(
             ["dnsrecon", "-d", target, "-t", "std"],
-            stderr=subprocess.DEVNULL, timeout=60, text=True
+            stderr=subprocess.DEVNULL, timeout=25, text=True
         )
         for line in out.splitlines():
             line = line.strip()

@@ -14,7 +14,10 @@
     </div>
     <a href="/" class="nav-item"><span class="nav-icon">🏠</span><span>Dashboard</span></a>
     <a href="/alerts" class="nav-item"><span class="nav-icon">🔔</span><span>Alerts</span></a>
-    <a href="/map" class="nav-item"><span class="nav-icon">🗺️</span><span>Network Map</span></a>
+    <a href="/map" class="nav-item"><span class="nav-icon"><span class="nav-icon">🗺️</span><span>Network Map</span></a>
+    <a href="/cameras" class="nav-item"><span class="nav-icon">📷</span><span>Cameras</span></a>
+    <a href="/recon" class="nav-item"><span class="nav-icon">🔍</span><span>Recon</span></a>
+    <a href="/activity" class="nav-item"><span class="nav-icon">📡</span><span>Live Activity</span></a>
     <a href="/reports" class="nav-item"><span class="nav-icon">📄</span><span>Reports</span></a>
     <div class="sidebar-status"><span class="status-dot"></span><span>MONITORING</span></div>
 </nav>
@@ -28,6 +31,7 @@
     </div>
     <div class="page">
         <a href="/" class="back-btn">← Back to Dashboard</a>
+        <a href="/watch/${ip}" class="btn btn-primary" style="margin-bottom:18px;display:inline-flex">👁️ Watch Live Traffic</a>
         <div id="detail-content">
             <div class="empty-state"><div class="empty-icon">⏳</div>Loading device data...</div>
         </div>
@@ -223,6 +227,33 @@ fetch(`/api/scan_results`)
             </div>
         </div>
 
+        <!-- CVE Database -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">🔥 CVE Vulnerabilities (NVD)</div>
+                <span class="risk-badge ${d.max_cvss >= 9.0 ? 'critical' : d.max_cvss >= 7.0 ? 'high' : d.max_cvss >= 4.0 ? 'medium' : 'safe'}">
+                    ${d.max_cvss ? 'Max CVSS ' + d.max_cvss : 'No CVEs'}
+                </span>
+            </div>
+            <div class="panel-body">
+                ${d.cve_results && d.cve_results.length ? d.cve_results.map(cr => `
+                    <div style="margin-bottom:16px;padding:12px;background:var(--bg3);border-radius:6px">
+                        <div style="font-weight:600;margin-bottom:6px;color:var(--cyan)">${cr.product} ${cr.version} (Port ${cr.port})</div>
+                        ${cr.cves.map(cve => {
+                            const cls = cve.score >= 9.0 ? 'critical' : cve.score >= 7.0 ? 'high' : cve.score >= 4.0 ? 'medium' : 'low';
+                            return `<div class="finding-item ${cls}" style="margin-bottom:6px">
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                                    <strong><a href="${cve.url}" target="_blank" style="color:inherit">${cve.id}</a></strong>
+                                    <span class="risk-badge ${cls}">CVSS ${cve.score}</span>
+                                </div>
+                                <div style="font-size:0.78rem;color:var(--text-dim)">${cve.description}</div>
+                            </div>`;
+                        }).join("")}
+                    </div>
+                `).join("") : '<div class="text-dim" style="font-size:0.78rem">No CVEs found — services are up to date ✓</div>'}
+            </div>
+        </div>
+
         <div class="detail-grid section-gap">
             <div class="panel">
                 <div class="panel-header"><div class="panel-title">💣 Metasploit (MSF)</div><span class="risk-badge ${d.msf?.length ? 'high' : 'safe'}">${d.msf?.length || 0} findings</span></div>
@@ -236,6 +267,10 @@ fetch(`/api/scan_results`)
 
         <!-- Banners & Wfuzz -->
         <div class="detail-grid section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🔑 John the Ripper</div><span class="risk-badge ${d.john?.length ? 'critical' : 'safe'}">${d.john?.length || 0} findings</span></div>
+                <div class="panel-body">${renderFindings(d.john, "critical")}</div>
+            </div>
             <div class="panel">
                 <div class="panel-header"><div class="panel-title">📡 Netcat Banners</div></div>
                 <div class="panel-body">

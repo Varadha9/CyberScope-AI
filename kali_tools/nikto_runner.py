@@ -5,9 +5,9 @@ def nikto_scan(target, port=80):
     findings = []
     try:
         ssl_flag = ["-ssl"] if port in (443, 8443) else []
-        cmd = ["nikto", "-h", target, "-p", str(port), "-maxtime", "60s",
-               "-nointeractive", "-Format", "txt"] + ssl_flag
-        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=90, text=True)
+        cmd = ["nikto", "-h", target, "-p", str(port), "-maxtime", "30s",
+               "-nointeractive", "-Format", "txt", "-output", "/dev/null"] + ssl_flag
+        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=45, text=True)
         for line in out.splitlines():
             line = line.strip("+ ").strip()
             if not line:

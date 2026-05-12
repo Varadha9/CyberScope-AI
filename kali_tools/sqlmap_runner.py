@@ -6,8 +6,9 @@ def sqlmap_scan(target, port=80):
         url = f"http{'s' if port in (443, 8443) else ''}://{target}:{port}"
         out = subprocess.check_output(
             ["sqlmap", "-u", url, "--batch", "--level=1", "--risk=1",
-             "--timeout=10", "--retries=1", "--output-dir=/tmp/sqlmap_out"],
-            stderr=subprocess.DEVNULL, timeout=120, text=True
+             "--timeout=5", "--retries=0", "--output-dir=/tmp/sqlmap_out",
+             "--forms", "--crawl=1"],
+            stderr=subprocess.DEVNULL, timeout=30, text=True
         )
         for line in out.splitlines():
             line = line.strip()

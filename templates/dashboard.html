@@ -24,6 +24,9 @@
     <a href="/" class="nav-item active"><span class="nav-icon">🏠</span><span>Dashboard</span></a>
     <a href="/alerts" class="nav-item"><span class="nav-icon">🔔</span><span>Alerts</span></a>
     <a href="/map" class="nav-item"><span class="nav-icon">🗺️</span><span>Network Map</span></a>
+    <a href="/cameras" class="nav-item"><span class="nav-icon">📷</span><span>Cameras</span></a>
+    <a href="/recon" class="nav-item"><span class="nav-icon">🔍</span><span>Recon</span></a>
+    <a href="/activity" class="nav-item"><span class="nav-icon">📡</span><span>Live Activity</span></a>
     <a href="/reports" class="nav-item"><span class="nav-icon">📄</span><span>Reports</span></a>
     <div class="sidebar-status">
         <span class="status-dot"></span>
@@ -45,6 +48,7 @@
     <!-- Controls -->
     <div class="controls-bar">
         <button class="btn btn-primary scan-btn" onclick="triggerScan()" id="btn-scan" title="Full network scan with all tools">▶ Full Scan</button>
+        <button class="btn btn-cyan scan-btn" onclick="triggerJohn()" title="John the Ripper hash analysis">🔑 John</button>
         <button class="btn scan-btn" onclick="triggerMasscan()" title="Fast port scan across subnet">⚡ Masscan</button>
         <button class="btn btn-cyan scan-btn" onclick="triggerSniff()" title="Capture live packets on wlan0">📶 Sniff</button>
         <button class="btn btn-cyan scan-btn" onclick="triggerTcpdump()" title="Tcpdump capture">📡 Tcpdump</button>
@@ -52,6 +56,8 @@
         <button class="btn" onclick="loadAlerts()" title="Reload alerts from database">⚠ Load Alerts</button>
         <button class="btn" onclick="generateReport()" title="Generate CSV report">📄 Export Report</button>
         <button class="btn btn-danger btn-sm" onclick="clearDB()" title="Clear all scan data">🗑 Clear DB</button>
+        <button class="btn btn-cyan scan-btn" onclick="triggerIPv6Scan()" title="Bypass client isolation via IPv6">🔓 IPv6 Bypass</button>
+        <button class="btn btn-cyan scan-btn" onclick="triggerPassiveHarvest()" title="Harvest device names from DHCP/mDNS/NetBIOS broadcasts">🕵️ Passive Intel</button>
     </div>
 
     <!-- Scan Progress Bar -->

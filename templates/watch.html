@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberScope AI — Watching {{ ip }}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<nav class="sidebar">
+    <div class="sidebar-logo">
+        <div class="logo-text">⬡ CYBERSCOPE</div>
+        <div class="logo-sub">AI NETWORK SCANNER</div>
+    </div>
+    <a href="/" class="nav-item"><span class="nav-icon">🏠</span><span>Dashboard</span></a>
+    <a href="/alerts" class="nav-item"><span class="nav-icon">🔔</span><span>Alerts</span></a>
+    <a href="/map" class="nav-item"><span class="nav-icon"><span class="nav-icon">🗺️</span><span>Network Map</span></a>
+    <a href="/cameras" class="nav-item"><span class="nav-icon">📷</span><span>Cameras</span></a>
+    <a href="/recon" class="nav-item"><span class="nav-icon">🔍</span><span>Recon</span></a>
+    <a href="/activity" class="nav-item"><span class="nav-icon">📡</span><span>Live Activity</span></a>
+    <a href="/reports" class="nav-item"><span class="nav-icon">📄</span><span>Reports</span></a>
+    <div class="sidebar-status"><span class="status-dot"></span><span>MONITORING</span></div>
+</nav>
+
+<div class="main-content">
+    <div class="topbar">
+        <div class="topbar-title">👁️ Live Watch — <span style="color:var(--cyan);font-family:'Courier New',monospace">{{ ip }}</span></div>
+        <div class="topbar-right">
+            <span class="topbar-badge" id="packet-count-badge">Waiting...</span>
+            <span id="status-text" style="font-size:0.75rem;color:var(--green);font-family:'Courier New',monospace">IDLE</span>
+            <span class="topbar-time" id="clock"></span>
+        </div>
+    </div>
+
+    <div class="page">
+        <a href="/device/{{ ip }}" class="back-btn">← Back to Device</a>
+
+        <!-- Device Info Bar -->
+        <div class="ai-bar" style="margin-bottom:16px" id="device-info-bar">
+            <span class="ai-icon">📡</span>
+            <span id="device-label">Loading device info...</span>
+        </div>
+
+        <!-- MITM Banner -->
+        <div id="mitm-banner" style="display:none;margin-bottom:16px;padding:12px 18px;background:#ff444411;border:1px solid #ff444444;border-radius:8px;align-items:center;justify-content:space-between;gap:12px">
+            <div>
+                <span style="color:var(--red);font-weight:600">⚠️ MITM Active</span>
+                <span style="color:var(--text-dim);font-size:0.78rem;margin-left:10px">ARP spoofing enabled — all traffic from this device is now visible</span>
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="stopMITM()">⏹ Stop MITM</button>
+        </div>
+        <div id="mitm-start-bar" style="margin-bottom:16px;padding:12px 18px;background:#ffd70011;border:1px solid #ffd70033;border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div>
+                <span style="color:var(--yellow);font-weight:600">📡 Client Isolation Detected</span>
+                <span style="color:var(--text-dim);font-size:0.78rem;margin-left:10px">Router is blocking traffic visibility. Enable MITM to see this device's traffic.</span>
+            </div>
+            <button class="btn btn-sm" style="border-color:var(--yellow);color:var(--yellow);background:#ffd70011" onclick="startMITM()">🔓 Enable MITM</button>
+        </div>
+
+        <!-- Controls -->
+        <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-primary" id="btn-watch" onclick="startWatch()">▶ Start Watching</button>
+            <button class="btn btn-danger" id="btn-stop" onclick="stopWatch()" disabled>⏹ Stop</button>
+            <button class="btn btn-cyan" onclick="exportCSV()">⬇ Export CSV</button>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:var(--text-dim)">
+                Auto-refresh every
+                <select id="refresh-interval" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:0.78rem">
+                    <option value="0">Once</option>
+                    <option value="20" selected>20s</option>
+                    <option value="30">30s</option>
+                    <option value="60">60s</option>
+                </select>
+            </label>
+            <span class="text-dim" style="font-size:0.72rem" id="last-updated"></span>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+            <div class="stat-card cyan"><div class="stat-icon">📦</div><div class="stat-label">Connections</div><div class="stat-value" id="s-conns">0</div></div>
+            <div class="stat-card yellow"><div class="stat-icon">⬆️</div><div class="stat-label">Outgoing</div><div class="stat-value" id="s-out">0</div></div>
+            <div class="stat-card red"><div class="stat-icon">⬇️</div><div class="stat-label">Incoming</div><div class="stat-value" id="s-in">0</div></div>
+            <div class="stat-card critical"><div class="stat-icon">💾</div><div class="stat-label">Total Bytes</div><div class="stat-value" id="s-bytes">0</div></div>
+        </div>
+
+        <!-- Activity Summary -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title"><span class="dot-indicator"></span> What is this device doing?</div>
+                <span class="text-dim" style="font-size:0.72rem">Grouped by activity type</span>
+            </div>
+            <div class="panel-body" id="activity-summary">
+                <div class="empty-state"><div class="empty-icon">👁️</div>Click ▶ Start Watching to begin</div>
+            </div>
+        </div>
+
+        <!-- Live Traffic Table -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">🔌 Live Connections</div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <input type="text" id="filter-input" placeholder="🔍 Filter..." class="search-input" oninput="filterTable()" style="width:160px">
+                    <button class="filter-btn active" data-dir="ALL" onclick="setDirFilter(this)">ALL</button>
+                    <button class="filter-btn" data-dir="OUT" onclick="setDirFilter(this)">⬆ OUT</button>
+                    <button class="filter-btn" data-dir="IN" onclick="setDirFilter(this)">⬇ IN</button>
+                </div>
+            </div>
+            <div class="panel-body no-pad">
+                <table class="device-table" id="traffic-table">
+                    <thead>
+                        <tr>
+                            <th>Direction</th>
+                            <th>Remote Host</th>
+                            <th>IP</th>
+                            <th>Port / Service</th>
+                            <th>Protocol</th>
+                            <th>App / Service</th>
+                            <th>Country</th>
+                            <th>Bytes</th>
+                            <th>Packets</th>
+                        </tr>
+                    </thead>
+                    <tbody id="traffic-body">
+                        <tr><td colspan="9" class="empty-state">No data yet — click ▶ Start Watching</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Suspicious Connections -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">⚠️ Suspicious Connections</div>
+                <span class="text-dim" style="font-size:0.72rem">Unusual ports or destinations</span>
+            </div>
+            <div class="panel-body" id="suspicious-panel">
+                <div class="empty-state"><div class="empty-icon">🛡️</div>No suspicious connections detected</div>
+            </div>
+        </div>
+
+        <!-- HTTP URLs captured -->
+        <div class="panel section-gap" id="http-panel">
+            <div class="panel-header">
+                <div class="panel-title">🌐 HTTP Requests Captured</div>
+                <span class="text-dim" style="font-size:0.72rem">Requires MITM active for HTTPS</span>
+            </div>
+            <div class="panel-body" id="http-urls-panel">
+                <div class="empty-state"><div class="empty-icon">🌐</div>No HTTP requests captured yet</div>
+            </div>
+        </div>
+
+        <!-- Charts: Timeline + Protocol Breakdown -->
+        <div class="grid-2 section-gap">
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">📈 Traffic Timeline</div><span class="text-dim" style="font-size:0.72rem">Bytes per capture window</span></div>
+                <div class="panel-body"><canvas id="timelineChart"></canvas></div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">🥧 Protocol Breakdown</div></div>
+                <div class="panel-body"><canvas id="protoChart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- Geo-IP Connections -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">🌍 Remote Geo-IP</div>
+                <span class="text-dim" style="font-size:0.72rem">Countries this device is talking to</span>
+            </div>
+            <div class="panel-body" id="geo-panel">
+                <div class="empty-state"><div class="empty-icon">🌍</div>No geo data yet</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+setInterval(() => { document.getElementById("clock").textContent = new Date().toLocaleTimeString(); }, 1000);
+
+const TARGET_IP = "{{ ip }}";
+let allRows = [];
+let dirFilter = "ALL";
+let watchTimer = null;
+let watching = false;
+let fetching = false;
+let captureTimeout = 20;
+let timelineChart, protoChart;
+
+const SUSPICIOUS_PORTS = new Set([23,4444,6667,1337,31337,9001,9030,445,135,139,3389,5900]);
+
+function initCharts() {
+    timelineChart = new Chart(document.getElementById("timelineChart").getContext("2d"), {
+        type: "line",
+        data: { labels: [], datasets: [
+            { label: "Bytes", data: [], borderColor: "#00d4ff", backgroundColor: "rgba(0,212,255,0.1)", tension: 0.4, fill: true, yAxisID: "y" },
+            { label: "Packets", data: [], borderColor: "#ffd700", backgroundColor: "rgba(255,215,0,0.1)", tension: 0.4, fill: false, yAxisID: "y1" }
+        ]},
+        options: { scales: {
+            x: { ticks: { color: "#555" } },
+            y:  { ticks: { color: "#00d4ff" }, beginAtZero: true, position: "left" },
+            y1: { ticks: { color: "#ffd700" }, beginAtZero: true, position: "right", grid: { drawOnChartArea: false } }
+        }, plugins: { legend: { labels: { color: "#c9d1d9" } } } }
+    });
+    protoChart = new Chart(document.getElementById("protoChart").getContext("2d"), {
+        type: "doughnut",
+        data: { labels: [], datasets: [{ data: [], backgroundColor: ["#00d4ff","#00ff88","#ffd700","#ff4444","#bb86fc","#ff8c00","#ff00aa"] }] },
+        options: { plugins: { legend: { labels: { color: "#c9d1d9", font: { size: 11 } } } } }
+    });
+}
+
+function startWatch() {
+    if (fetching) return;
+    watching = true;
+    document.getElementById("btn-watch").disabled = true;
+    document.getElementById("btn-stop").disabled = false;
+    if (!timelineChart) initCharts();
+    fetch("/api/spoof/status").then(r=>r.json()).then(d=>{
+        captureTimeout = d.spoofing.includes(TARGET_IP) ? 20 : 15;
+        fetchTraffic();
+    }).catch(() => { captureTimeout = 15; fetchTraffic(); });
+}
+
+function stopWatch() {
+    watching = false;
+    fetching = false;
+    clearTimeout(watchTimer);
+    document.getElementById("btn-watch").disabled = false;
+    document.getElementById("btn-stop").disabled = true;
+    document.getElementById("status-text").textContent = "STOPPED";
+    document.getElementById("status-text").style.color = "var(--text-dim)";
+}
+
+function fetchTraffic() {
+    if (!watching || fetching) return;
+    fetching = true;
+    document.getElementById("packet-count-badge").textContent = `Capturing ${captureTimeout}s...`;
+    document.getElementById("status-text").textContent = "CAPTURING";
+    document.getElementById("status-text").style.color = "var(--yellow)";
+
+    fetch(`/api/watch/${TARGET_IP}?count=500&timeout=${captureTimeout}`)
+        .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        })
+        .then(data => {
+            fetching = false;
+            if (data && data.error) {
+                showWatchError(data.error);
+                return;
+            }
+            allRows = Array.isArray(data) ? data.filter(r => r && !r.error) :
+                      (data && data.packets) ? data.packets.filter(r => r && !r.error) : [];
+            // Handle {packets, beacons} response shape
+            const beacons = data && data.beacons ? data.beacons : [];
+            renderTable();
+            renderActivitySummary();
+            renderSuspicious();
+            renderHttpUrls();
+            renderGeo();
+            renderProtoChart();
+            updateStats();
+            // Push timeline
+            if (timelineChart) {
+                const now = new Date().toLocaleTimeString();
+                const totalBytes = allRows.reduce((s,r) => s+r.bytes, 0);
+                const totalPkts  = allRows.reduce((s,r) => s+r.count, 0);
+                if (timelineChart.data.labels.length > 15) {
+                    timelineChart.data.labels.shift();
+                    timelineChart.data.datasets[0].data.shift();
+                    timelineChart.data.datasets[1].data.shift();
+                }
+                timelineChart.data.labels.push(now);
+                timelineChart.data.datasets[0].data.push(totalBytes);
+                timelineChart.data.datasets[1].data.push(totalPkts);
+                timelineChart.update();
+            }
+            // Show beacon alerts inline
+            if (beacons.length) {
+                const susp = document.getElementById("suspicious-panel");
+                const beaconHtml = beacons.map(b =>
+                    `<div class="finding-item critical" style="margin-bottom:6px">
+                        <strong>🚨 BEACON</strong> → ${b.host} every ~${b.interval}s (${b.count} hits) ${b.country||""}
+                    </div>`).join("");
+                susp.insertAdjacentHTML("afterbegin", beaconHtml);
+            }
+            const badge = allRows.length ? allRows.length + " connection(s)" : "Device idle — no traffic seen";
+            document.getElementById("packet-count-badge").textContent = badge;
+            document.getElementById("last-updated").textContent = "Updated: " + new Date().toLocaleTimeString();
+            document.getElementById("status-text").textContent = "WATCHING";
+            document.getElementById("status-text").style.color = "var(--green)";
+            if (allRows.length === 0) {
+                showIdleHint();
+            }
+            const interval = parseInt(document.getElementById("refresh-interval").value);
+            if (watching && interval > 0) {
+                watchTimer = setTimeout(fetchTraffic, interval * 1000);
+            } else if (interval === 0) {
+                stopWatch();
+            }
+        })
+        .catch(err => {
+            fetching = false;
+            document.getElementById("status-text").textContent = "ERROR";
+            document.getElementById("status-text").style.color = "var(--red)";
+            document.getElementById("packet-count-badge").textContent = "Error — retrying...";
+            showWatchError(String(err));
+            if (watching) watchTimer = setTimeout(fetchTraffic, 12000);
+        });
+}
+
+function showWatchError(msg) {
+    const tbody = document.getElementById("traffic-body");
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state" style="color:var(--red)">
+        ❌ Capture error: ${msg}<br>
+        <span style="font-size:0.75rem;color:var(--text-dim)">Make sure the app is running with sudo and tshark is installed. Try enabling MITM below.</span>
+    </td></tr>`;
+}
+
+function showIdleHint() {
+    const isMITM = document.getElementById("mitm-banner").style.display !== "none";
+    if (!isMITM) {
+        document.getElementById("mitm-start-bar").style.display = "flex";
+    }
+}
+
+function renderTable() {
+    const q = document.getElementById("filter-input").value.toLowerCase();
+    const filtered = allRows.filter(r => {
+        if (dirFilter !== "ALL" && r.direction !== dirFilter) return false;
+        if (q && !JSON.stringify(r).toLowerCase().includes(q)) return false;
+        return true;
+    });
+
+    const tbody = document.getElementById("traffic-body");
+    if (!filtered.length) {
+        const isIdle = allRows.length === 0;
+        tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${isIdle
+            ? '<div class="empty-icon">💤</div>Device is idle — no network traffic detected in this capture window. Try again or use a longer interval.'
+            : 'No connections match filter'}</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(r => {
+        const dirColor = r.direction === "OUT" ? "var(--yellow)" : "var(--cyan)";
+        const dirIcon  = r.direction === "OUT" ? "⬆" : "⬇";
+        const isSusp   = SUSPICIOUS_PORTS.has(parseInt(r.remote_port));
+        const rowBg    = isSusp ? "background:#ff444408" : "";
+        const bytes    = r.bytes > 1024*1024 ? (r.bytes/1024/1024).toFixed(1)+"MB"
+                       : r.bytes > 1024 ? (r.bytes/1024).toFixed(1)+"KB"
+                       : r.bytes+"B";
+        const geoFlag  = r.geo_suspicious ? `<span style="color:var(--red)" title="Suspicious country">⚠️ ${r.country||""}</span>`
+                       : `<span style="color:var(--text-dim);font-size:0.72rem">${r.country||""}</span>`;
+        return `<tr style="${rowBg}">
+            <td><span style="color:${dirColor};font-weight:600">${dirIcon} ${r.direction}</span></td>
+            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.remote_host}">
+                ${r.remote_host ? `<span style="color:var(--text)">${r.remote_host}</span>` : '<span class="text-dim">—</span>'}
+            </td>
+            <td class="mono" style="font-size:0.75rem;color:var(--cyan)">${r.remote_ip}</td>
+            <td>
+                <span class="port-tag ${isSusp?'danger':''}" style="font-size:0.7rem;padding:2px 7px">
+                    ${isSusp?"⚠ ":""}${r.remote_port}${r.service && r.service !== r.remote_port ? " <small style='opacity:0.6'>"+r.service+"</small>" : ""}
+                </span>
+            </td>
+            <td><span class="risk-badge low" style="font-size:0.68rem">${r.proto||"?"}</span></td>
+            <td style="font-size:0.8rem;font-weight:500">${r.app||r.activity||"—"}</td>
+            <td>${geoFlag}</td>
+            <td style="color:var(--yellow);font-family:'Courier New',monospace;font-size:0.75rem">${bytes}</td>
+            <td style="color:var(--text-dim);font-size:0.75rem">${r.count}</td>
+        </tr>`;
+    }).join("");
+}
+
+function renderActivitySummary() {
+    const actMap = {};
+    allRows.forEach(r => {
+        const a = r.app || r.activity || "📦 Other";
+        if (!actMap[a]) actMap[a] = { count: 0, bytes: 0 };
+        actMap[a].count += r.count;
+        actMap[a].bytes += r.bytes;
+    });
+
+    const sorted = Object.entries(actMap).sort((a,b) => b[1].bytes - a[1].bytes);
+    const el = document.getElementById("activity-summary");
+
+    if (!sorted.length) {
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">👁️</div>No activity detected</div>';
+        return;
+    }
+
+    el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:10px">` +
+        sorted.map(([act, info]) => {
+            const bytes = info.bytes > 1024*1024 ? (info.bytes/1024/1024).toFixed(1)+"MB"
+                        : info.bytes > 1024 ? (info.bytes/1024).toFixed(1)+"KB"
+                        : info.bytes+"B";
+            return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px 16px;min-width:160px">
+                <div style="font-size:1rem;margin-bottom:4px">${act}</div>
+                <div style="font-size:0.72rem;color:var(--text-dim)">${info.count} packet(s) · ${bytes}</div>
+            </div>`;
+        }).join("") + `</div>`;
+}
+
+function renderSuspicious() {
+    const susp = allRows.filter(r => SUSPICIOUS_PORTS.has(parseInt(r.remote_port)));
+    const el = document.getElementById("suspicious-panel");
+    if (!susp.length) {
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">🛡️</div>No suspicious connections detected</div>';
+        return;
+    }
+    el.innerHTML = susp.map(r => `
+        <div class="finding-item critical" style="margin-bottom:6px">
+            <strong>⚠ Port ${r.remote_port}</strong> — ${r.direction} to <span class="mono">${r.remote_ip}</span>
+            ${r.remote_host ? ` (${r.remote_host})` : ""} — ${r.app||r.activity}
+            ${r.country ? ` <span style="color:var(--text-dim);font-size:0.72rem">${r.country}</span>` : ""}
+        </div>`).join("");
+}
+
+function renderHttpUrls() {
+    const urls = allRows.flatMap(r => r.http_urls || []).filter(Boolean);
+    const el = document.getElementById("http-urls-panel");
+    if (!urls.length) {
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">🌐</div>No HTTP requests captured — enable MITM to see HTTPS traffic</div>';
+        return;
+    }
+    el.innerHTML = urls.map(u =>
+        `<div class="finding-item info" style="margin-bottom:4px;font-family:'Courier New',monospace;font-size:0.75rem">${u}</div>`
+    ).join("");
+}
+
+function renderGeo() {
+    const geoMap = {};
+    allRows.forEach(r => {
+        if (!r.country || r.remote_ip === "DNS" || r.country === "🏠 Local") return;
+        const key = r.country;
+        if (!geoMap[key]) geoMap[key] = { count: 0, bytes: 0, suspicious: r.geo_suspicious, ips: new Set() };
+        geoMap[key].count += r.count;
+        geoMap[key].bytes += r.bytes;
+        if (r.remote_ip) geoMap[key].ips.add(r.remote_ip);
+    });
+    const el = document.getElementById("geo-panel");
+    const entries = Object.entries(geoMap).sort((a,b) => b[1].bytes - a[1].bytes);
+    if (!entries.length) {
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">🌍</div>No remote connections yet</div>';
+        return;
+    }
+    el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:10px">` +
+        entries.map(([country, info]) => {
+            const bytes = info.bytes > 1024*1024 ? (info.bytes/1024/1024).toFixed(1)+"MB"
+                        : info.bytes > 1024 ? (info.bytes/1024).toFixed(1)+"KB" : info.bytes+"B";
+            const border = info.suspicious ? "border-color:var(--red)" : "";
+            return `<div style="background:var(--bg3);border:1px solid var(--border);${border};border-radius:8px;padding:10px 14px;min-width:140px">
+                <div style="font-size:1rem;margin-bottom:4px">${country}${info.suspicious ? ' <span style="color:var(--red)">⚠</span>' : ""}</div>
+                <div style="font-size:0.72rem;color:var(--text-dim)">${info.count} packets · ${bytes}</div>
+                <div style="font-size:0.7rem;color:var(--text-dim);margin-top:2px">${info.ips.size} IP(s)</div>
+            </div>`;
+        }).join("") + `</div>`;
+}
+
+function renderProtoChart() {
+    if (!protoChart) return;
+    const protoMap = {};
+    allRows.forEach(r => {
+        const p = r.proto || "Other";
+        protoMap[p] = (protoMap[p] || 0) + r.bytes;
+    });
+    const entries = Object.entries(protoMap).sort((a,b) => b[1]-a[1]).slice(0, 7);
+    protoChart.data.labels = entries.map(e => e[0]);
+    protoChart.data.datasets[0].data = entries.map(e => e[1]);
+    protoChart.update();
+}
+
+function updateStats() {
+    const out   = allRows.filter(r => r.direction === "OUT").length;
+    const inn   = allRows.filter(r => r.direction === "IN").length;
+    const bytes = allRows.reduce((s,r) => s + r.bytes, 0);
+    const bStr  = bytes > 1024*1024 ? (bytes/1024/1024).toFixed(1)+"M"
+                : bytes > 1024 ? (bytes/1024).toFixed(1)+"K" : bytes+"B";
+    document.getElementById("s-conns").textContent = allRows.length;
+    document.getElementById("s-out").textContent   = out;
+    document.getElementById("s-in").textContent    = inn;
+    document.getElementById("s-bytes").textContent = bStr;
+}
+
+function setDirFilter(btn) {
+    document.querySelectorAll(".filter-btn[data-dir]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    dirFilter = btn.dataset.dir;
+    renderTable();
+}
+
+// Check spoof status on load
+fetch("/api/spoof/status").then(r=>r.json()).then(d=>{
+    if (d.spoofing.includes(TARGET_IP)) showMITMActive();
+});
+
+function startMITM() {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = "Starting...";
+    fetch(`/api/spoof/start/${TARGET_IP}`)
+        .then(r => r.json())
+        .then(d => {
+            if (d.status === "started" || d.status === "already_running") {
+                showMITMActive();
+                setTimeout(() => { if (!watching) startWatch(); }, 2000);
+            } else {
+                btn.disabled = false;
+                btn.textContent = "🔓 Enable MITM";
+                document.getElementById("mitm-start-bar").innerHTML = `
+                    <div>
+                        <span style="color:var(--red);font-weight:600">❌ MITM Failed</span>
+                        <span style="color:var(--text-dim);font-size:0.78rem;margin-left:10px">${d.error || d.status}</span>
+                        <br><span style="color:var(--yellow);font-size:0.75rem;margin-top:4px;display:block">⚠️ Run the app with sudo: <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">sudo python3 app.py</code></span>
+                    </div>
+                    <button class="btn btn-sm" style="border-color:var(--yellow);color:var(--yellow)" onclick="startMITM()">🔄 Retry</button>
+                `;
+            }
+        })
+        .catch(() => { btn.disabled = false; btn.textContent = "🔓 Enable MITM"; });
+}
+
+function stopMITM() {
+    fetch(`/api/spoof/stop/${TARGET_IP}`)
+        .then(r => r.json())
+        .then(() => {
+            document.getElementById("mitm-banner").style.display = "none";
+            document.getElementById("mitm-start-bar").style.display = "flex";
+            const btn = document.querySelector("#mitm-start-bar button");
+            if (btn) { btn.disabled = false; btn.textContent = "🔓 Enable MITM"; }
+        });
+}
+
+function showMITMActive() {
+    const banner = document.getElementById("mitm-banner");
+    banner.style.display = "flex";
+    document.getElementById("mitm-start-bar").style.display = "none";
+}
+
+function filterTable() { renderTable(); }
+
+// Load device info on page load
+fetch("/api/scan_results").then(r=>r.json()).then(results=>{
+    const row = results.find(r => r.ip === TARGET_IP);
+    const bar = document.getElementById("device-label");
+    if (row) {
+        const d = row.data;
+        const hn = d.hostname && d.hostname !== "unknown" ? d.hostname : "";
+        bar.innerHTML = `<strong>${hn||TARGET_IP}</strong> &nbsp;|  MAC: <span class="mono">${d.mac||"—"}</span> &nbsp;|  OS: ${d.os||"Unknown"} &nbsp;|  Open Ports: <span style="color:var(--yellow)">${d.ports?.length||0}</span>`;
+    } else { bar.textContent = TARGET_IP + " — no scan data yet"; }
+});
+
+function exportCSV() {
+    if (!allRows.length) return;
+    const rows = [["Direction","Remote Host","IP","Port","Service","Protocol","App","Country","Bytes","Packets"]];
+    allRows.forEach(r => rows.push([r.direction, r.remote_host, r.remote_ip, r.remote_port, r.service, r.proto, r.app||r.activity, r.country||"" ,r.bytes, r.count]));
+    const csv = rows.map(r => r.map(v => `"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
+    a.download = `traffic_${TARGET_IP}_${Date.now()}.csv`;
+    a.click();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberScope AI — Camera Viewer</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+</head>
+<body>
+<nav class="sidebar">
+    <div class="sidebar-logo">
+        <div class="logo-text">⬡ CYBERSCOPE</div>
+        <div class="logo-sub">AI NETWORK SCANNER</div>
+    </div>
+    <a href="/" class="nav-item"><span class="nav-icon">🏠</span><span>Dashboard</span></a>
+    <a href="/alerts" class="nav-item"><span class="nav-icon">🔔</span><span>Alerts</span></a>
+    <a href="/map" class="nav-item"><span class="nav-icon">🗺️</span><span>Network Map</span></a>
+    <a href="/recon" class="nav-item"><span class="nav-icon">🔍</span><span>Recon</span></a>
+    <a href="/cameras" class="nav-item active"><span class="nav-icon">📷</span><span>Cameras</span></a>
+    <a href="/reports" class="nav-item"><span class="nav-icon">📄</span><span>Reports</span></a>
+    <div class="sidebar-status"><span class="status-dot"></span><span>MONITORING</span></div>
+</nav>
+
+<div class="main-content">
+    <div class="topbar">
+        <div class="topbar-title">📷 Camera Intelligence</div>
+        <div class="topbar-right">
+            <span class="topbar-badge" id="cam-badge">Ready</span>
+            <span class="topbar-time" id="clock"></span>
+        </div>
+    </div>
+
+    <div class="page">
+
+        <!-- Camera Discovery -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">🔍 Detected Cameras</div>
+                <div style="display:flex;gap:8px">
+                    <button class="btn btn-sm btn-primary" onclick="scanCameras()">🔄 Scan</button>
+                    <button class="btn btn-sm btn-cyan" onclick="addManual()">➕ Add IP</button>
+                </div>
+            </div>
+            <div class="panel-body no-pad" id="camera-list">
+                <div class="empty-state"><div class="empty-icon">📷</div>Click Scan to detect cameras</div>
+            </div>
+        </div>
+
+        <!-- Active Camera View -->
+        <div id="camera-view" style="display:none">
+
+            <!-- Live Feed -->
+            <div class="panel section-gap">
+                <div class="panel-header">
+                    <div class="panel-title" id="cam-title">📷 Camera Feed</div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                        <button class="btn btn-sm btn-primary" id="btn-stream" onclick="startStream()">▶ Live Stream</button>
+                        <button class="btn btn-sm btn-danger" id="btn-stop" onclick="stopStream()" style="display:none">⏹ Stop</button>
+                        <button class="btn btn-sm btn-cyan" onclick="takeSnapshot()">📸 Snapshot</button>
+                        <button class="btn btn-sm" style="border-color:var(--yellow);color:var(--yellow)" onclick="probeRTSP()">🔎 Probe RTSP</button>
+                    </div>
+                </div>
+                <div style="background:#000;min-height:420px;display:flex;align-items:center;justify-content:center;position:relative;border-radius:0 0 8px 8px;overflow:hidden">
+                    <!-- MJPEG live stream — src set dynamically -->
+                    <img id="stream-img" style="max-width:100%;max-height:560px;display:none;object-fit:contain" alt="Live stream">
+                    <!-- Snapshot fallback -->
+                    <img id="snapshot-img" style="max-width:100%;max-height:560px;display:none;object-fit:contain" alt="Snapshot">
+                    <div id="cam-placeholder" style="color:#555;font-family:'Courier New',monospace;text-align:center;padding:40px">
+                        <div style="font-size:3rem;margin-bottom:16px">📷</div>
+                        <div style="margin-bottom:8px">Enter credentials below, then click ▶ Live Stream</div>
+                        <div style="font-size:0.75rem;color:#444">Stream is served as MJPEG via ffmpeg — works in any browser</div>
+                    </div>
+                    <!-- Overlay -->
+                    <div id="cam-overlay" style="position:absolute;top:10px;left:10px;background:rgba(0,0,0,0.75);padding:5px 12px;border-radius:4px;font-family:'Courier New',monospace;font-size:0.72rem;color:#00ff88;display:none">
+                        <span id="cam-overlay-ip"></span> &nbsp;|&nbsp; <span id="cam-overlay-time"></span>
+                    </div>
+                    <!-- Stream status badge -->
+                    <div id="stream-status" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.75);padding:4px 10px;border-radius:4px;font-size:0.72rem;font-family:'Courier New',monospace;color:#ffd700;display:none"></div>
+                </div>
+            </div>
+
+            <!-- Credentials + Actions -->
+            <div class="panel section-gap">
+                <div class="panel-header"><div class="panel-title">🔑 Credentials & Actions</div></div>
+                <div class="panel-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                    <input type="text" id="cam-user" value="admin" placeholder="Username"
+                        style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:4px;font-family:inherit;width:120px">
+                    <input type="password" id="cam-pass" value="" placeholder="Password"
+                        style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:4px;font-family:inherit;width:160px">
+                    <button class="btn btn-sm btn-primary" onclick="testCreds()">✓ Test</button>
+                    <button class="btn btn-sm btn-cyan" onclick="bruteForceCam()">🔓 Brute Force</button>
+                    <button class="btn btn-sm" style="border-color:var(--yellow);color:var(--yellow)" onclick="interceptCam()">🕵️ Intercept Hash</button>
+                    <span id="creds-status" style="font-size:0.78rem;color:var(--text-dim)"></span>
+                </div>
+            </div>
+
+            <!-- RTSP URLs -->
+            <div class="panel section-gap">
+                <div class="panel-header"><div class="panel-title">📡 RTSP Stream URLs</div></div>
+                <div class="panel-body" id="rtsp-urls">
+                    <div class="empty-state">Enter credentials and click 🔎 Probe RTSP to discover streams</div>
+                </div>
+            </div>
+
+            <!-- Snapshots Gallery -->
+            <div class="panel section-gap">
+                <div class="panel-header">
+                    <div class="panel-title">🖼️ Snapshots</div>
+                    <button class="btn btn-sm" onclick="clearSnapshots()">🗑 Clear</button>
+                </div>
+                <div class="panel-body" id="snapshots-gallery" style="display:flex;flex-wrap:wrap;gap:10px">
+                    <div class="empty-state" style="width:100%">No snapshots yet</div>
+                </div>
+            </div>
+
+            <!-- Vulnerability Report -->
+            <div class="panel section-gap">
+                <div class="panel-header">
+                    <div class="panel-title">⚠️ Vulnerability Report</div>
+                    <button class="btn btn-sm btn-danger" onclick="runVulnScan()">🔍 Full CVE Scan</button>
+                </div>
+                <div class="panel-body" id="vuln-report">
+                    <div class="empty-state">Click Full CVE Scan to run checks</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+setInterval(() => {
+    document.getElementById("clock").textContent = new Date().toLocaleTimeString();
+    const ov = document.getElementById("cam-overlay-time");
+    if (ov) ov.textContent = new Date().toLocaleTimeString();
+}, 1000);
+
+const socket = io();
+let activeCam = null;
+let streamActive = false;
+let streamPollInterval = null;
+
+// ── Camera discovery ──────────────────────────────────────────────────────────
+
+function scanCameras() {
+    document.getElementById("cam-badge").textContent = "Scanning...";
+    document.getElementById("camera-list").innerHTML = '<div class="empty-state">Loading cameras...</div>';
+
+    fetch("/api/cameras")
+        .then(r => r.json())
+        .then(cameras => {
+            document.getElementById("cam-badge").textContent = cameras.length + " camera(s)";
+            if (!cameras.length) {
+                document.getElementById("camera-list").innerHTML =
+                    '<div class="empty-state"><div class="empty-icon">📷</div>No cameras found — run a Full Scan first from the Dashboard</div>';
+                return;
+            }
+            document.getElementById("camera-list").innerHTML = cameras.map(d => {
+                const portStr = (d.ports || []).join(", ") || "—";
+                const hn = d.hostname || "";
+                return `<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)">
+                    <div>
+                        <div style="font-weight:600;color:var(--cyan);font-family:'Courier New',monospace">${d.ip}</div>
+                        <div style="font-size:0.78rem;color:var(--text-dim)">${hn} | MAC: ${d.mac || "—"} | Ports: ${portStr}</div>
+                    </div>
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn-sm btn-primary" onclick="selectCamera('${d.ip}', '${hn.replace(/'/g,"")}')">📷 View</button>
+                        <button class="btn btn-sm btn-danger" onclick="quickStream('${d.ip}')">▶ Stream</button>
+                        <button class="btn btn-sm btn-cyan" onclick="runVulnScanIP('${d.ip}')">🔍 Scan</button>
+                    </div>
+                </div>`;
+            }).join("");
+        })
+        .catch(err => {
+            document.getElementById("camera-list").innerHTML =
+                `<div class="empty-state" style="color:var(--red)">Error: ${err}</div>`;
+        });
+}
+
+function addManual() {
+    const ip = prompt("Enter camera IP address:");
+    if (!ip) return;
+    selectCamera(ip.trim(), "");
+}
+
+// ── Camera selection ──────────────────────────────────────────────────────────
+
+function selectCamera(ip, hostname) {
+    activeCam = ip;
+    stopStream();
+    document.getElementById("camera-view").style.display = "block";
+    document.getElementById("cam-title").textContent = `📷 ${hostname || ip} (${ip})`;
+    document.getElementById("cam-overlay-ip").textContent = ip;
+    document.getElementById("cam-overlay").style.display = "block";
+    showPlaceholder();
+    document.getElementById("camera-view").scrollIntoView({behavior: "smooth"});
+    buildRTSPList(ip);
+}
+
+function quickStream(ip) {
+    selectCamera(ip, "");
+    // Small delay to let the view render
+    setTimeout(startStream, 300);
+}
+
+// ── Live MJPEG stream ─────────────────────────────────────────────────────────
+
+function startStream() {
+    if (!activeCam) return;
+    const user = document.getElementById("cam-user").value;
+    const pass = document.getElementById("cam-pass").value;
+
+    stopStream();
+
+    const url = `/api/camera/stream/${activeCam}?user=${encodeURIComponent(user)}&pass=${encodeURIComponent(pass)}`;
+    const img = document.getElementById("stream-img");
+
+    img.onerror = () => {
+        setStreamStatus("⚠ Stream error — check credentials or try Brute Force", "var(--red)");
+        showPlaceholder();
+        streamActive = false;
+        document.getElementById("btn-stream").style.display = "";
+        document.getElementById("btn-stop").style.display = "none";
+    };
+
+    img.onload = () => {
+        document.getElementById("cam-placeholder").style.display = "none";
+        setStreamStatus("● LIVE", "var(--green)");
+    };
+
+    img.src = url;
+    img.style.display = "block";
+    document.getElementById("snapshot-img").style.display = "none";
+    document.getElementById("cam-placeholder").style.display = "none";
+    document.getElementById("btn-stream").style.display = "none";
+    document.getElementById("btn-stop").style.display = "";
+    document.getElementById("stream-status").style.display = "block";
+    setStreamStatus("⏳ Connecting...", "var(--yellow)");
+    document.getElementById("cam-badge").textContent = "Streaming...";
+    streamActive = true;
+
+    // Poll to confirm stream is alive (MJPEG keeps loading so onload fires once)
+    streamPollInterval = setInterval(() => {
+        if (!streamActive) return;
+        // If img naturalWidth > 0 the stream is delivering frames
+        if (img.naturalWidth > 0) {
+            setStreamStatus("● LIVE", "var(--green)");
+            document.getElementById("cam-badge").textContent = "● LIVE";
+        }
+    }, 2000);
+}
+
+function stopStream() {
+    streamActive = false;
+    clearInterval(streamPollInterval);
+    const img = document.getElementById("stream-img");
+    img.src = "";
+    img.style.display = "none";
+    document.getElementById("btn-stream").style.display = "";
+    document.getElementById("btn-stop").style.display = "none";
+    document.getElementById("stream-status").style.display = "none";
+    document.getElementById("cam-badge").textContent = "Stopped";
+}
+
+function setStreamStatus(msg, color) {
+    const el = document.getElementById("stream-status");
+    el.textContent = msg;
+    el.style.color = color || "var(--yellow)";
+    el.style.display = "block";
+}
+
+function showPlaceholder() {
+    document.getElementById("cam-placeholder").style.display = "flex";
+    document.getElementById("stream-img").style.display = "none";
+    document.getElementById("snapshot-img").style.display = "none";
+}
+
+// ── Snapshot ──────────────────────────────────────────────────────────────────
+
+function takeSnapshot() {
+    if (!activeCam) return;
+    const user = document.getElementById("cam-user").value;
+    const pass = document.getElementById("cam-pass").value;
+    const status = document.getElementById("creds-status");
+    status.textContent = "Capturing snapshot...";
+    status.style.color = "var(--yellow)";
+
+    fetch(`/api/camera/snapshot?ip=${activeCam}&user=${encodeURIComponent(user)}&pass=${encodeURIComponent(pass)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.image_b64) {
+                stopStream();
+                const img = document.getElementById("snapshot-img");
+                img.src = "data:image/jpeg;base64," + data.image_b64;
+                img.style.display = "block";
+                document.getElementById("cam-placeholder").style.display = "none";
+                addToGallery(data.image_b64, activeCam);
+                status.textContent = `✓ Snapshot (${(data.size/1024).toFixed(1)} KB)`;
+                status.style.color = "var(--green)";
+            } else {
+                status.textContent = "✗ " + (data.error || "Snapshot failed");
+                status.style.color = "var(--red)";
+            }
+        })
+        .catch(() => {
+            status.textContent = "✗ Request failed";
+            status.style.color = "var(--red)";
+        });
+}
+
+// ── RTSP probe ────────────────────────────────────────────────────────────────
+
+function probeRTSP() {
+    if (!activeCam) return;
+    const user = document.getElementById("cam-user").value;
+    const pass = document.getElementById("cam-pass").value;
+    const el = document.getElementById("rtsp-urls");
+    el.innerHTML = '<div class="empty-state">Probing RTSP streams...</div>';
+
+    fetch(`/api/camera/probe/${activeCam}?user=${encodeURIComponent(user)}&pass=${encodeURIComponent(pass)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.found) {
+                el.innerHTML = `
+                    <div class="finding-item info" style="margin-bottom:8px">
+                        <strong style="color:var(--green)">✓ Working stream found</strong><br>
+                        <span style="font-family:'Courier New',monospace;font-size:0.75rem">${data.display}</span>
+                        <div style="margin-top:8px;display:flex;gap:8px">
+                            <button class="btn btn-sm btn-primary" onclick="startStream()">▶ Stream Now</button>
+                            <button class="btn btn-sm" onclick="copyToClipboard('${data.url}')">📋 Copy URL</button>
+                        </div>
+                    </div>`;
+            } else {
+                el.innerHTML = buildRTSPList(activeCam, true);
+            }
+        });
+}
+
+function buildRTSPList(ip, returnHtml) {
+    const user = document.getElementById("cam-user")?.value || "admin";
+    const pass = document.getElementById("cam-pass")?.value || "";
+    const paths = [
+        "/Streaming/Channels/101",
+        "/Streaming/Channels/102",
+        "/Streaming/Channels/201",
+        "/h264/ch1/main/av_stream",
+        "/PSIA/Streaming/channels/1",
+    ];
+    const html = paths.map(p => {
+        const url = `rtsp://${user}:${pass}@${ip}:554${p}`;
+        const urlNoAuth = `rtsp://${ip}:554${p}`;
+        return `<div style="margin-bottom:8px">
+            <div class="finding-item info" style="font-family:'Courier New',monospace;font-size:0.75rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+                <span>${urlNoAuth}</span>
+                <div style="display:flex;gap:6px">
+                    <button class="btn btn-sm" style="padding:2px 8px;font-size:0.68rem" onclick="copyToClipboard('${url}')">📋 Copy</button>
+                    <button class="btn btn-sm btn-cyan" style="padding:2px 8px;font-size:0.68rem" onclick="openVLC('${url}')">▶ VLC</button>
+                </div>
+            </div>
+        </div>`;
+    }).join("");
+    if (returnHtml) return html;
+    const el = document.getElementById("rtsp-urls");
+    if (el) el.innerHTML = html;
+}
+
+// ── Credentials ───────────────────────────────────────────────────────────────
+
+function testCreds() {
+    if (!activeCam) return;
+    const user = document.getElementById("cam-user").value;
+    const pass = document.getElementById("cam-pass").value;
+    const status = document.getElementById("creds-status");
+    status.textContent = "Testing...";
+    status.style.color = "var(--yellow)";
+
+    fetch(`/api/camera/test_creds?ip=${activeCam}&user=${encodeURIComponent(user)}&pass=${encodeURIComponent(pass)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                status.textContent = "✓ Valid credentials!";
+                status.style.color = "var(--green)";
+                buildRTSPList(activeCam);
+            } else {
+                status.textContent = `✗ Invalid (HTTP ${data.status || "?"})`;
+                status.style.color = "var(--red)";
+            }
+        });
+}
+
+function bruteForceCam() {
+    if (!activeCam) return;
+    const status = document.getElementById("creds-status");
+    status.textContent = "Brute forcing 24 passwords...";
+    status.style.color = "var(--yellow)";
+
+    fetch(`/api/camera/brute?ip=${activeCam}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.found) {
+                status.textContent = `✓ Found: ${data.username}:${data.password}`;
+                status.style.color = "var(--green)";
+                document.getElementById("cam-user").value = data.username;
+                document.getElementById("cam-pass").value = data.password;
+                buildRTSPList(activeCam);
+                // Auto-start stream with found creds
+                setTimeout(startStream, 500);
+            } else {
+                status.textContent = "✗ No default credentials found";
+                status.style.color = "var(--red)";
+            }
+        });
+}
+
+function interceptCam() {
+    if (!activeCam) return;
+    const status = document.getElementById("creds-status");
+    status.textContent = "MITM active — open http://" + activeCam + " and log in...";
+    status.style.color = "var(--yellow)";
+    fetch("/api/camera/intercept/" + activeCam)
+        .then(r => r.json())
+        .then(() => {
+            alert("Interceptor started!\n\nNow open http://" + activeCam + " in your browser and log in.\nThe hash will be captured and cracked automatically.\nWatch the Activity Log for results.");
+        });
+}
+
+// ── Vuln scan ─────────────────────────────────────────────────────────────────
+
+function runVulnScan() {
+    if (!activeCam) return;
+    runVulnScanIP(activeCam);
+}
+
+function runVulnScanIP(ip) {
+    const el = document.getElementById("vuln-report");
+    if (el) el.innerHTML = '<div class="empty-state">Running CVE checks...</div>';
+    if (!activeCam) selectCamera(ip, "");
+
+    fetch(`/api/hikvision/${ip}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!el) return;
+            const riskCls = data.risk_level === "CRITICAL" ? "critical" : data.risk_level === "HIGH" ? "high" : "medium";
+            el.innerHTML = `
+                <div style="margin-bottom:12px">
+                    <span class="risk-badge ${riskCls}">${data.risk_level}</span>
+                    ${data.firmware_date ? `<span style="margin-left:12px;font-size:0.78rem;color:var(--text-dim)">Firmware: ${data.firmware_date}</span>` : ""}
+                    ${data.realm ? `<span style="margin-left:12px;font-size:0.78rem;color:var(--text-dim)">Realm: ${data.realm}</span>` : ""}
+                </div>
+                ${data.summary.map(s => `<div class="finding-item ${riskCls}" style="margin-bottom:6px">${s}</div>`).join("")}
+                ${data.cve_2021_36260?.vulnerable
+                    ? '<div class="finding-item critical">CVE-2021-36260: Unauthenticated RCE VULNERABLE</div>'
+                    : '<div class="finding-item info">CVE-2021-36260: Patched ✓</div>'}
+                ${data.cve_2017_7921?.vulnerable
+                    ? `<div class="finding-item critical">CVE-2017-7921: Auth bypass VULNERABLE — ${data.cve_2017_7921.data?.slice(0,100)}</div>`
+                    : '<div class="finding-item info">CVE-2017-7921: Patched ✓</div>'}
+                ${data.credentials?.found
+                    ? `<div class="finding-item critical">🔑 Default creds: ${data.credentials.username}:${data.credentials.password}</div>`
+                    : ""}
+                ${data.device_info?.model ? `<div class="finding-item info">Model: ${data.device_info.model}</div>` : ""}
+                ${data.device_info?.firmwareVersion ? `<div class="finding-item info">Firmware: ${data.device_info.firmwareVersion}</div>` : ""}
+                ${data.device_info?.serialNumber ? `<div class="finding-item info">Serial: ${data.device_info.serialNumber}</div>` : ""}
+            `;
+            if (data.credentials?.found) {
+                document.getElementById("cam-user").value = data.credentials.username;
+                document.getElementById("cam-pass").value = data.credentials.password;
+                buildRTSPList(ip);
+                if (activeCam === ip) setTimeout(startStream, 500);
+            }
+        });
+}
+
+// ── Gallery ───────────────────────────────────────────────────────────────────
+
+function addToGallery(b64, ip) {
+    const gallery = document.getElementById("snapshots-gallery");
+    const empty = gallery.querySelector(".empty-state");
+    if (empty) empty.remove();
+    const time = new Date().toLocaleTimeString();
+    const div = document.createElement("div");
+    div.style.cssText = "position:relative;cursor:pointer";
+    div.innerHTML = `
+        <img src="data:image/jpeg;base64,${b64}"
+             style="width:200px;height:150px;object-fit:cover;border-radius:6px;border:1px solid var(--border)"
+             onclick="this.requestFullscreen()">
+        <div style="font-size:0.68rem;color:var(--text-dim);text-align:center;margin-top:4px">${ip} ${time}</div>
+        <a href="data:image/jpeg;base64,${b64}" download="snapshot_${ip}_${Date.now()}.jpg"
+           style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.7);padding:2px 6px;border-radius:4px;font-size:0.68rem;color:var(--cyan)">⬇</a>
+    `;
+    gallery.prepend(div);
+}
+
+function clearSnapshots() {
+    document.getElementById("snapshots-gallery").innerHTML = '<div class="empty-state" style="width:100%">No snapshots yet</div>';
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        const status = document.getElementById("creds-status");
+        status.textContent = "Copied!";
+        status.style.color = "var(--green)";
+        setTimeout(() => { status.textContent = ""; }, 2000);
+    });
+}
+
+function openVLC(url) {
+    window.open("vlc://" + url.replace("rtsp://", ""), "_blank");
+}
+
+// WebSocket: auto-fill creds if brute force finds them via background scan
+socket.on("alert", data => {
+    if (activeCam && data.message && data.message.includes(activeCam) && data.message.includes("Credentials found")) {
+        const m = data.message.match(/Credentials found (\S+):(\S+)/);
+        if (m) {
+            document.getElementById("cam-user").value = m[1];
+            document.getElementById("cam-pass").value = m[2];
+            document.getElementById("creds-status").textContent = `✓ Auto-filled: ${m[1]}:${m[2]}`;
+            document.getElementById("creds-status").style.color = "var(--green)";
+        }
+    }
+});
+
+// Auto-scan on load — only if we have a known camera IP in the URL hash
+if (window.location.hash) {
+    const ip = window.location.hash.slice(1);
+    if (ip.match(/^\d+\.\d+\.\d+\.\d+$/)) {
+        selectCamera(ip, "");
+    }
+}
+</script>
+</body>
+</html>

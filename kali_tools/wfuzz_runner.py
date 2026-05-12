@@ -11,7 +11,7 @@ def wfuzz_scan(target, port=80):
         url = f"http{'s' if port in (443, 8443) else ''}://{target}:{port}/FUZZ"
         out = subprocess.check_output(
             ["wfuzz", "-w", WORDLIST, "--hc", "404", "-t", "20", "-f", "/dev/stdout,raw", url],
-            stderr=subprocess.DEVNULL, timeout=90, text=True
+            stderr=subprocess.DEVNULL, timeout=30, text=True
         )
         for line in out.splitlines():
             line = line.strip()

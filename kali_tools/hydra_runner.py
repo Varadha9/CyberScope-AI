@@ -26,7 +26,7 @@ def hydra_scan(target, open_ports):
                  "-t", "4", "-f", "-u",
                  f"{target}", service, "-s", str(port)],
                 input=f"{DEFAULT_USERS}\n{DEFAULT_PASS}",
-                stderr=subprocess.DEVNULL, timeout=60, text=True
+                stderr=subprocess.DEVNULL, timeout=20, text=True
             )
             for line in out.splitlines():
                 if "[" in line and "] login:" in line:

@@ -16,14 +16,21 @@ from scapy.all import ARP, Ether, srp, conf, get_if_hwaddr, getmacbyip
 
 import os
 
-SUDO_PASS = os.environ.get("CYBERSCOPE_SUDO_PASS", "dogs")
+SUDO_PASS = os.environ.get("CYBERSCOPE_SUDO_PASS", "")
 
 def _sudo(cmd, timeout=60):
-    full = f"echo '{SUDO_PASS}' | sudo -S bash -c \"{cmd}\""
     try:
-        out = subprocess.check_output(full, shell=True, stderr=subprocess.DEVNULL,
-                                      text=True, timeout=timeout)
-        return out
+        proc = subprocess.Popen(
+            ["sudo", "-S", "bash", "-c", cmd],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        if SUDO_PASS:
+            proc.stdin.write((SUDO_PASS + "\n").encode())
+            proc.stdin.flush()
+        out, _ = proc.communicate(timeout=timeout)
+        return out.decode(errors="ignore")
     except Exception:
         return ""
 
@@ -151,26 +158,31 @@ def _direct_scan(ip):
         pass
     return ports
 
+def _sudo_proc(args):
+    """Launch a sudo process safely via stdin pipe."""
+    proc = subprocess.Popen(
+        ["sudo", "-S"] + args,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if SUDO_PASS:
+        try:
+            proc.stdin.write((SUDO_PASS + "\n").encode())
+            proc.stdin.flush()
+        except Exception:
+            pass
+    return proc
+
 def _mitm_scan(ip, gw_ip):
     """ARP spoof then scan."""
     ports = []
     try:
-        # Start spoof
-        spoof_proc = subprocess.Popen(
-            f"echo '{SUDO_PASS}' | sudo -S arpspoof -i wlan0 -t {ip} {gw_ip}",
-            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        spoof_proc2 = subprocess.Popen(
-            f"echo '{SUDO_PASS}' | sudo -S arpspoof -i wlan0 -t {gw_ip} {ip}",
-            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
+        spoof_proc  = _sudo_proc(["arpspoof", "-i", "wlan0", "-t", ip, gw_ip])
+        spoof_proc2 = _sudo_proc(["arpspoof", "-i", "wlan0", "-t", gw_ip, ip])
         import time
-        time.sleep(3)  # Wait for ARP tables to update
-
-        # Scan
+        time.sleep(3)
         ports = _direct_scan(ip)
-
-        # Stop spoof
         spoof_proc.terminate()
         spoof_proc2.terminate()
     except Exception as e:

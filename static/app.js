@@ -168,7 +168,19 @@ function getDeviceIcon(d) {
     return "📡";
 }
 
-// ── Scan Progress ──
+// ── Debounced stat refresh ──
+let _statRefreshTimer = null;
+function _scheduleStatRefresh() {
+    clearTimeout(_statRefreshTimer);
+    _statRefreshTimer = setTimeout(() => {
+        fetch("/api/scan_results").then(r => r.json()).then(results => {
+            const all = results.map(r => r.data).filter(d => d && d.ip);
+            setStatValue("total-vulns",   all.reduce((s, d) => s + (d.vulns?.length  || 0), 0));
+            setStatValue("total-threats", all.reduce((s, d) => s + (d.threats?.length || 0), 0));
+            setStatValue("total-ports",   all.reduce((s, d) => s + (d.ports?.length   || 0), 0));
+        });
+    }, 1500); // wait 1.5s after last update before fetching
+}
 let scanTotal = 0;
 let scanDone  = 0;
 let scanRunning = false;
@@ -383,6 +395,18 @@ socket.on("scan_complete", (data) => {
         if (ai) ai.textContent = "🤖 AI: " + topComment.comment;
     }
     log(`✔ Scan complete — ${devices.length} device(s) found`, "success");
+    // Deep scan results arrive via device_update over next few minutes
+    // Poll once after 2min to catch any vulns that arrived silently
+    setTimeout(() => {
+        fetch("/api/scan_results").then(r => r.json()).then(results => {
+            const all = results.map(r => r.data).filter(d => d && d.ip);
+            setStatValue("total-vulns",   all.reduce((s, d) => s + (d.vulns?.length  || 0), 0));
+            setStatValue("total-threats", all.reduce((s, d) => s + (d.threats?.length || 0), 0));
+            setStatValue("total-ports",   all.reduce((s, d) => s + (d.ports?.length   || 0), 0));
+            setStatValue("total-devices", all.length);
+            updateDeviceTable(all);
+        });
+    }, 120000);
 });
 
 socket.on("device_update", (data) => {
@@ -398,13 +422,15 @@ socket.on("device_update", (data) => {
         const color = getRiskColor(score);
         const rowBg = score >= 70 ? "background:#ff00aa08" : score >= 50 ? "background:#ff444408" : score >= 20 ? "background:#ffd70008" : "";
         row.style.cssText = rowBg;
-        row.cells[2].textContent = d.os || "?";
+        row.cells[2].textContent = (d.os && d.os !== "Unknown" && !d.os.startsWith("SCAN(")) ? d.os : row.cells[2].textContent;
         row.cells[3].innerHTML = `<div class="risk-score-wrap"><div class="risk-score-bar"><div class="risk-score-fill" style="width:${score}%;background:${color}"></div></div><span class="risk-score-num"><span class="risk-badge ${cls}">${score}</span></span></div>`;
         row.cells[4].innerHTML = d.threats?.length ? `<span class="risk-badge high">⚠ ${d.threats.length}</span>` : '<span class="risk-badge safe">✓ SAFE</span>';
-        row.cells[5].innerHTML = d.vulns?.length ? `<span class="risk-badge critical">💀 ${d.vulns.length}</span>` : '<span class="text-dim">—</span>';
+        row.cells[5].innerHTML = d.vulns?.length   ? `<span class="risk-badge critical">💀 ${d.vulns.length}</span>`   : '<span class="text-dim">—</span>';
         row.cells[6].innerHTML = buildToolBadges(d);
         row.cells[7].textContent = d.comment ? d.comment.slice(0, 50) + (d.comment.length > 50 ? "…" : "") : "—";
     }
+    // Recompute stat bar totals — debounced so N updates = 1 fetch
+    _scheduleStatRefresh();
     log(`[${ip}] Deep scan updated`, "success");
 });
 
@@ -414,8 +440,13 @@ socket.on("device_found", (data) => {
 
 socket.on("alert", (data) => {
     addAlert(data.message, data.severity);
+    // Increment live counter — accurate for new alerts during this session
     const cur = parseInt(document.getElementById("total-alerts")?.textContent) || 0;
     setStatValue("total-alerts", cur + 1);
+    // Sync true count from DB every 5 alerts to avoid drift
+    if ((cur + 1) % 5 === 0) {
+        fetch("/api/alerts").then(r => r.json()).then(a => setStatValue("total-alerts", a.length));
+    }
 });
 
 // ── Helpers ──
@@ -667,10 +698,18 @@ document.addEventListener("DOMContentLoaded", () => {
             setStatValue("total-alerts", alerts.length);
             const feed = document.getElementById("alert-feed");
             if (!feed) return;
-            if (!alerts.length) {
+            // Deduplicate alerts by message before rendering
+            const seen = new Set();
+            const unique = alerts.filter(a => {
+                const key = a.alert + a.severity;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+            if (!unique.length) {
                 feed.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F6E1}\uFE0F</div>No alerts yet...</div>';
             } else {
-                alerts.slice(0, 20).forEach(a => addAlert(a.alert, a.severity));
+                unique.slice(0, 20).forEach(a => addAlert(a.alert, a.severity));
             }
         });
     }).catch(err => log("Init load error: " + err, "error"));

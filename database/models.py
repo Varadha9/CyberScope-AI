@@ -108,12 +108,17 @@ def get_all_devices():
 
 def get_all_alerts():
     conn = sqlite3.connect(DB)
-    rows = conn.execute("SELECT alert, severity, timestamp FROM alerts ORDER BY id DESC LIMIT 100").fetchall()
+    rows = conn.execute("SELECT alert, severity, timestamp FROM alerts ORDER BY id DESC LIMIT 500").fetchall()
     conn.close()
     return [{"alert": r[0], "severity": r[1], "timestamp": r[2]} for r in rows]
 
 def get_scan_results():
     conn = sqlite3.connect(DB)
-    rows = conn.execute("SELECT ip, data, timestamp FROM scan_results ORDER BY id DESC LIMIT 50").fetchall()
+    # One row per IP (latest) — no arbitrary limit
+    rows = conn.execute("""
+        SELECT ip, data, timestamp FROM scan_results
+        WHERE id IN (SELECT MAX(id) FROM scan_results GROUP BY ip)
+        ORDER BY id DESC
+    """).fetchall()
     conn.close()
     return [{"ip": r[0], "data": json.loads(r[1]), "timestamp": r[2]} for r in rows]

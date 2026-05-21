@@ -324,13 +324,13 @@ def run_scan():
         log(f"Found device: {ip} ({mac})", "info")
 
         log(f"[{ip}] Running port scan...", "tool")
+        ipv6_addr = None
         if isolated:
             # IPv6 bypass: PSPF blocks IPv4 but NOT IPv6 link-local
             ipv6_addr = get_ipv6_for_mac(mac)
             if ipv6_addr:
                 log(f"[{ip}] Client isolation detected - using IPv6 bypass ({ipv6_addr})", "warn")
                 ports = ipv6_port_scan(ipv6_addr, iface="wlan0", top_ports=1000)
-                result["ipv6"] = ipv6_addr
             else:
                 ports = smart_port_scan(ip, mac, gw_ip, use_mitm=False)
         else:
@@ -355,7 +355,8 @@ def run_scan():
             "whatweb": [], "wpscan": [], "sqlmap": [],
             "gobuster": [], "wfuzz": [], "sslscan": [],
             "hydra": [], "john": [], "enum4linux": [], "searchsploit": [],
-            "nc_banners": {}, "comment": comment
+            "nc_banners": {}, "comment": comment,
+            "ipv6": ipv6_addr or "",
         }
         intel = get_intel(mac=mac) or get_intel(ip=ip)
         if intel:
@@ -383,7 +384,11 @@ def run_scan():
     for result in results:
         if len(result["ports"]) == 0 and not is_spoofing(result["ip"]):
             mac = result.get("mac", "")
-            if mac and mac in known_macs:
+            # Only auto-MITM if device was already known from a PREVIOUS scan
+            # (mac exists in DB before this scan ran) AND has a real non-randomized MAC
+            oui_second_nibble = int(mac.replace(":","")[1], 16) if mac else 0
+            is_randomized = oui_second_nibble in (2, 6, 0xa, 0xe)
+            if mac and mac in known_macs and not is_randomized:
                 log(f"[Auto-MITM] {result['ip']} persistent ghost - starting ARP spoof", "warn")
                 sr = start_spoof(result["ip"], iface="wlan0")
                 if sr.get("status") == "started":
@@ -723,33 +728,91 @@ def api_ipv6_scan():
 
 @app.route("/api/cameras")
 def api_cameras():
-    """Return all detected cameras from scan results."""
+    """
+    Return all detected cameras.
+    Sources:
+      1. Scan results DB — devices with camera ports/hostnames
+      2. Active TCP probe of the whole subnet for ports 554, 8000, 8554
+         so cameras hidden by client isolation still appear
+    """
+    import socket as _sock
+
+    def _tcp_open(ip, port, timeout=1):
+        try:
+            s = _sock.socket()
+            s.settimeout(timeout)
+            s.connect((ip, port))
+            s.close()
+            return True
+        except Exception:
+            return False
+
+    def _probe_camera(ip):
+        """Quick check: is this IP a camera? Returns open ports list or []."""
+        cam_ports = [554, 8000, 8554, 80, 8080]
+        open_ports = [p for p in cam_ports if _tcp_open(ip, p, timeout=1)]
+        return open_ports
+
+    # ── Source 1: DB scan results ─────────────────────────────────────────
     results = get_scan_results()
     cameras = []
+    seen_ips = set()
+
     for r in results:
         d = r.get("data", {})
-        h = (d.get("hostname", "") or "").lower()
+        h     = (d.get("hostname", "") or "").lower()
         ports = d.get("ports", []) or []
         dtype = (d.get("device_type", "") or "").lower()
-        mac = (d.get("mac", "") or "").lower()
-        vendor = mac  # will be enriched client-side
+        mac   = (d.get("mac", "") or "").lower()
         is_cam = (
             any(k in h for k in ["hik", "camera", "nvr", "dahua", "cam", "axis", "rtsp"]) or
             any(p in ports for p in [554, 8000, 8554, 9010]) or
             "camera" in dtype or
-            "hikvision" in mac.replace(":","")
+            "hikvision" in mac.replace(":", "")
         )
         if is_cam:
             cameras.append({
-                "ip": r["ip"],
-                "mac": d.get("mac", ""),
-                "hostname": d.get("hostname", ""),
-                "ports": ports,
-                "os": d.get("os", ""),
-                "device_type": d.get("device_type", ""),
-                "timestamp": r.get("timestamp", ""),
+                "ip": r["ip"], "mac": d.get("mac", ""),
+                "hostname": d.get("hostname", ""), "ports": ports,
+                "os": d.get("os", ""), "device_type": d.get("device_type", ""),
+                "timestamp": r.get("timestamp", ""), "source": "scan",
             })
-    # Also add any known camera IPs not in scan results
+            seen_ips.add(r["ip"])
+
+    # ── Source 2: Active subnet probe for camera ports ────────────────────
+    # Probe every IP in the /24 subnet concurrently — finds cameras even
+    # if they were never discovered by ARP scan (client isolation)
+    subnet_prefix = get_target_subnet().rsplit(".", 1)[0]
+    probe_results = {}
+    probe_lock = threading.Lock()
+
+    def _probe_worker(ip):
+        if ip in seen_ips:
+            return
+        open_ports = _probe_camera(ip)
+        if open_ports:
+            with probe_lock:
+                probe_results[ip] = open_ports
+
+    threads = []
+    for i in range(1, 255):
+        ip = f"{subnet_prefix}.{i}"
+        t = threading.Thread(target=_probe_worker, args=(ip,), daemon=True)
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join(timeout=3)
+
+    for ip, open_ports in probe_results.items():
+        # Verify it looks like a camera (port 554 = RTSP, 8000 = Hikvision SDK)
+        if any(p in open_ports for p in [554, 8000, 8554]):
+            cameras.append({
+                "ip": ip, "mac": "", "hostname": "Camera (probed)",
+                "ports": open_ports, "os": "", "device_type": "IP Camera",
+                "timestamp": "", "source": "probe",
+            })
+            log(f"[Camera Probe] Found camera at {ip} ports={open_ports}", "warn")
+
     return jsonify(cameras)
 
 @app.route("/cameras")
@@ -818,7 +881,10 @@ def api_camera_intercept(ip):
     def run():
         import subprocess, os
         env = os.environ.copy()
-        env['CYBERSCOPE_SUDO_PASS'] = 'dogs'
+        # Pass sudo password from environment — never hardcode
+        sudo_pass = os.environ.get("CYBERSCOPE_SUDO_PASS", "")
+        if sudo_pass:
+            env["CYBERSCOPE_SUDO_PASS"] = sudo_pass
         log(f'[Camera] Starting credential interceptor on {ip}...', 'warn')
         log(f'[Camera] Open http://{ip} in browser and log in to capture hash', 'warn')
         socketio.emit('alert', {'message': f'MITM interceptor active on {ip} - waiting for login', 'severity': 'MEDIUM'})
@@ -967,7 +1033,29 @@ def api_alerts():
 
 @app.route("/api/scan_results")
 def api_scan_results():
-    return jsonify(get_scan_results())
+    results = get_scan_results()
+    # Ensure any IP that has alerts but no scan result still appears
+    from database.models import get_all_alerts as _ga
+    result_ips = {r["ip"] for r in results}
+    import re as _re
+    for alert in _ga():
+        m = _re.search(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b", alert["alert"])
+        if m:
+            ip = m.group(1)
+            if ip not in result_ips and not ip.endswith(".0") and not ip.endswith(".255"):
+                # Add a minimal stub so it shows in the device table
+                stub = {
+                    "ip": ip, "mac": "", "hostname": "unknown",
+                    "ports": [], "services": {}, "os": "Unknown",
+                    "threats": [], "vulns": [], "nikto": [], "msf": [],
+                    "whatweb": [], "wpscan": [], "sqlmap": [], "gobuster": [],
+                    "wfuzz": [], "sslscan": [], "hydra": [], "john": [],
+                    "enum4linux": [], "searchsploit": [], "nc_banners": {},
+                    "comment": "Detected via alerts — run Full Scan to enumerate",
+                }
+                results.append({"ip": ip, "data": stub, "timestamp": ""})
+                result_ips.add(ip)
+    return jsonify(results)
 
 @app.route("/api/report")
 def api_report():

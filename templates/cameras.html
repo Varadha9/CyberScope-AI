@@ -144,8 +144,8 @@ let streamPollInterval = null;
 // ── Camera discovery ──────────────────────────────────────────────────────────
 
 function scanCameras() {
-    document.getElementById("cam-badge").textContent = "Scanning...";
-    document.getElementById("camera-list").innerHTML = '<div class="empty-state">Loading cameras...</div>';
+    document.getElementById("cam-badge").textContent = "Scanning subnet...";
+    document.getElementById("camera-list").innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div>Probing all 254 IPs for camera ports (554, 8000, 8554)... this takes ~10s</div>';
 
     fetch("/api/cameras")
         .then(r => r.json())
@@ -153,23 +153,29 @@ function scanCameras() {
             document.getElementById("cam-badge").textContent = cameras.length + " camera(s)";
             if (!cameras.length) {
                 document.getElementById("camera-list").innerHTML =
-                    '<div class="empty-state"><div class="empty-icon">📷</div>No cameras found — run a Full Scan first from the Dashboard</div>';
+                    '<div class="empty-state"><div class="empty-icon">📷</div>No cameras found on subnet — use ➕ Add IP to enter camera IP manually</div>';
                 return;
             }
             document.getElementById("camera-list").innerHTML = cameras.map(d => {
                 const portStr = (d.ports || []).join(", ") || "—";
                 const hn = d.hostname || "";
-                return `<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)">
-                    <div>
-                        <div style="font-weight:600;color:var(--cyan);font-family:'Courier New',monospace">${d.ip}</div>
-                        <div style="font-size:0.78rem;color:var(--text-dim)">${hn} | MAC: ${d.mac || "—"} | Ports: ${portStr}</div>
+                const badge = d.source === "probe"
+                    ? `<span style="font-size:0.68rem;color:var(--yellow);margin-left:6px">📡 probed</span>`
+                    : `<span style="font-size:0.68rem;color:var(--green);margin-left:6px">✓ scanned</span>`;
+                return `<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:10px">
+                    <div style="flex:1;min-width:200px">
+                        <div style="font-weight:600;color:var(--cyan);font-family:'Courier New',monospace">${d.ip} ${badge}</div>
+                        <div style="font-size:0.78rem;color:var(--text-dim)">${hn || d.device_type || "IP Camera"} | MAC: ${d.mac || "—"} | Ports: ${portStr}</div>
+                        <div id="card-status-${d.ip}" style="font-size:0.75rem;margin-top:4px"></div>
                     </div>
-                    <div style="display:flex;gap:8px">
-                        <button class="btn btn-sm btn-primary" onclick="selectCamera('${d.ip}', '${hn.replace(/'/g,"")}')">📷 View</button>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                        <button class="btn btn-sm btn-cyan" id="btn-brute-${d.ip}" onclick="cardBrute('${d.ip}')">🔓 Brute Force</button>
                         <button class="btn btn-sm btn-danger" onclick="quickStream('${d.ip}')">▶ Stream</button>
-                        <button class="btn btn-sm btn-cyan" onclick="runVulnScanIP('${d.ip}')">🔍 Scan</button>
+                        <button class="btn btn-sm btn-primary" onclick="selectCamera('${d.ip}', '${(hn||d.ip).replace(/'/g,"")}')">📷 View</button>
+                        <button class="btn btn-sm" style="border-color:var(--yellow);color:var(--yellow)" onclick="cardCVE('${d.ip}')">🔍 CVE Scan</button>
                     </div>
-                </div>`;
+                </div>
+                <div id="card-result-${d.ip}" style="display:none;padding:10px 18px;border-bottom:1px solid var(--border);background:var(--bg3);font-size:0.78rem"></div>`;
             }).join("");
         })
         .catch(err => {
@@ -392,22 +398,21 @@ function testCreds() {
 function bruteForceCam() {
     if (!activeCam) return;
     const status = document.getElementById("creds-status");
-    status.textContent = "Brute forcing 24 passwords...";
+    status.textContent = "Brute forcing 35 passwords × 6 usernames...";
     status.style.color = "var(--yellow)";
 
     fetch(`/api/camera/brute?ip=${activeCam}`)
         .then(r => r.json())
         .then(data => {
             if (data.found) {
-                status.textContent = `✓ Found: ${data.username}:${data.password}`;
+                status.textContent = `✓ Found: ${data.username}:${data.password} (${data.auth_type || "Digest"})`;
                 status.style.color = "var(--green)";
                 document.getElementById("cam-user").value = data.username;
                 document.getElementById("cam-pass").value = data.password;
                 buildRTSPList(activeCam);
-                // Auto-start stream with found creds
                 setTimeout(startStream, 500);
             } else {
-                status.textContent = "✗ No default credentials found";
+                status.textContent = "✗ No default credentials found — try 🕵️ Intercept";
                 status.style.color = "var(--red)";
             }
         });
@@ -523,7 +528,79 @@ socket.on("alert", data => {
     }
 });
 
-// Auto-scan on load — only if we have a known camera IP in the URL hash
+// ── Card-level quick actions (no need to click View first) ──────────────────
+
+function cardBrute(ip) {
+    const btn    = document.getElementById("btn-brute-" + ip);
+    const status = document.getElementById("card-status-" + ip);
+    const result = document.getElementById("card-result-" + ip);
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Bruting..."; }
+    if (status) { status.textContent = "Trying 35 passwords × 6 usernames..."; status.style.color = "var(--yellow)"; }
+
+    fetch("/api/camera/brute?ip=" + ip)
+        .then(r => r.json())
+        .then(data => {
+            if (btn) { btn.disabled = false; btn.textContent = "🔓 Brute Force"; }
+            if (data.found) {
+                const msg = `✓ Creds: ${data.username}:${data.password} (${data.auth_type || "Digest"})`;
+                if (status) { status.textContent = msg; status.style.color = "var(--green)"; }
+                if (result) {
+                    result.style.display = "block";
+                    result.innerHTML = `<span style="color:var(--green)">${msg}</span>
+                        &nbsp;<button class="btn btn-sm btn-danger" onclick="quickStreamWithCreds('${ip}','${data.username}','${data.password}')">▶ Stream Now</button>
+                        &nbsp;<button class="btn btn-sm btn-cyan" onclick="selectCameraWithCreds('${ip}','${data.username}','${data.password}')">📷 View</button>`;
+                }
+            } else {
+                if (status) { status.textContent = "✗ No default creds — try 📷 View → 🕵️ Intercept"; status.style.color = "var(--red)"; }
+            }
+        })
+        .catch(() => {
+            if (btn) { btn.disabled = false; btn.textContent = "🔓 Brute Force"; }
+            if (status) { status.textContent = "✗ Request failed"; status.style.color = "var(--red)"; }
+        });
+}
+
+function cardCVE(ip) {
+    const result = document.getElementById("card-result-" + ip);
+    const status = document.getElementById("card-status-" + ip);
+    if (status) { status.textContent = "Running CVE checks..."; status.style.color = "var(--yellow)"; }
+    if (result) { result.style.display = "block"; result.innerHTML = "⏳ Running CVE-2021-36260, CVE-2017-7921, brute force..."; }
+
+    fetch("/api/hikvision/" + ip)
+        .then(r => r.json())
+        .then(data => {
+            if (status) { status.textContent = "CVE scan done: " + data.risk_level; status.style.color = data.risk_level === "CRITICAL" ? "var(--critical)" : data.risk_level === "HIGH" ? "var(--red)" : "var(--green)"; }
+            if (result) {
+                const cls = data.risk_level === "CRITICAL" ? "critical" : data.risk_level === "HIGH" ? "high" : "medium";
+                result.style.display = "block";
+                result.innerHTML = data.summary.map(s => `<div class="finding-item ${cls}" style="margin-bottom:4px">${s}</div>`).join("") ||
+                    `<div class="finding-item info">No critical findings</div>`;
+                if (data.credentials?.found) {
+                    result.innerHTML += `<div style="margin-top:8px">
+                        <button class="btn btn-sm btn-danger" onclick="quickStreamWithCreds('${ip}','${data.credentials.username}','${data.credentials.password}')">▶ Stream with found creds</button>
+                    </div>`;
+                }
+            }
+        });
+}
+
+function quickStreamWithCreds(ip, user, pass) {
+    selectCamera(ip, "");
+    document.getElementById("cam-user").value = user;
+    document.getElementById("cam-pass").value = pass;
+    setTimeout(startStream, 400);
+}
+
+function selectCameraWithCreds(ip, user, pass) {
+    selectCamera(ip, "");
+    document.getElementById("cam-user").value = user;
+    document.getElementById("cam-pass").value = pass;
+}
+
+// Auto-scan on load
+document.addEventListener("DOMContentLoaded", () => scanCameras());
+
+// Auto-select camera from URL hash
 if (window.location.hash) {
     const ip = window.location.hash.slice(1);
     if (ip.match(/^\d+\.\d+\.\d+\.\d+$/)) {

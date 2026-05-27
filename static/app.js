@@ -468,6 +468,14 @@ function hideSpinner() {
     if (overlay) overlay.classList.remove("active");
 }
 
+function filterDevices() {
+    const q = document.getElementById("device-search")?.value.toLowerCase() || "";
+    document.querySelectorAll(".device-row").forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = (!q || text.includes(q)) ? "" : "none";
+    });
+}
+
 function scrollToDevices() {
     document.getElementById("devices-section")?.scrollIntoView({ behavior: "smooth" });
 }

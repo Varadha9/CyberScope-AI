@@ -116,7 +116,11 @@
         <div class="panel section-gap" id="devices-section">
             <div class="panel-header">
                 <div class="panel-title"><span class="dot-indicator"></span> Connected Devices</div>
-                <span class="text-dim" style="font-size:0.75rem" id="device-count-label"></span>
+                <div style="display:flex;align-items:center;gap:10px">
+                    <input type="text" id="device-search" placeholder="🔍 Search devices..." oninput="filterDevices()"
+                        style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;font-family:inherit;font-size:0.75rem;width:160px">
+                    <span class="text-dim" style="font-size:0.75rem" id="device-count-label"></span>
+                </div>
             </div>
             <div class="panel-body no-pad">
                 <table class="device-table">

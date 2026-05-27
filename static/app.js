@@ -395,6 +395,8 @@ socket.on("scan_complete", (data) => {
         if (ai) ai.textContent = "🤖 AI: " + topComment.comment;
     }
     log(`✔ Scan complete — ${devices.length} device(s) found`, "success");
+    const lastScan = document.getElementById("last-scan-time");
+    if (lastScan) lastScan.textContent = "Last scan: " + new Date().toLocaleTimeString();
     // Deep scan results arrive via device_update over next few minutes
     // Poll once after 2min to catch any vulns that arrived silently
     setTimeout(() => {

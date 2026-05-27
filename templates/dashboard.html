@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CyberScope AI — Dashboard</title>
+    <meta name="description" content="Real-time WiFi Network Security Monitor">
     <link rel="stylesheet" href="/static/style.css">
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -32,6 +33,9 @@
         <span class="status-dot"></span>
         <span id="sidebar-status-text">MONITORING</span>
     </div>
+    <div style="padding:10px 20px;font-size:0.68rem;color:var(--text-dim);border-top:1px solid var(--border)">
+        v2.0 &nbsp;|&nbsp; <a href="https://github.com/Varadha9/CyberScope-AI" target="_blank" style="color:var(--cyan)">GitHub</a>
+    </div>
 </nav>
 
 <!-- Main -->
@@ -41,6 +45,7 @@
         <div class="topbar-right">
             <span class="topbar-badge" id="subnet-badge">WiFi: detecting...</span>
             <span id="status-text" style="font-size:0.75rem;color:var(--green);font-family:'Courier New',monospace">MONITORING ACTIVE</span>
+            <span style="font-size:0.72rem;color:var(--text-dim);font-family:'Courier New',monospace" id="last-scan-time"></span>
             <span class="topbar-time" id="clock"></span>
         </div>
     </div>

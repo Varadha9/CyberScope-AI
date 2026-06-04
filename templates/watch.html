@@ -84,6 +84,17 @@
             <div class="stat-card critical"><div class="stat-icon">💾</div><div class="stat-label">Total Bytes</div><div class="stat-value" id="s-bytes">0</div></div>
         </div>
 
+        <!-- Active Apps & Sites -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title"><span class="dot-indicator"></span> 📱 Active Apps & Sites</div>
+                <span class="text-dim" style="font-size:0.72rem">Exact domains + app identified from live traffic</span>
+            </div>
+            <div class="panel-body" id="apps-sites-panel">
+                <div class="empty-state"><div class="empty-icon">👁️</div>Click ▶ Start Watching to begin</div>
+            </div>
+        </div>
+
         <!-- Activity Summary -->
         <div class="panel section-gap">
             <div class="panel-header">
@@ -110,15 +121,15 @@
                 <table class="device-table" id="traffic-table">
                     <thead>
                         <tr>
-                            <th>Direction</th>
-                            <th>Remote Host</th>
-                            <th>IP</th>
-                            <th>Port / Service</th>
-                            <th>Protocol</th>
+                            <th>Dir</th>
                             <th>App / Service</th>
+                            <th>Domain / Host</th>
+                            <th>IP</th>
+                            <th>Port</th>
+                            <th>Proto</th>
                             <th>Country</th>
                             <th>Bytes</th>
-                            <th>Packets</th>
+                            <th>Pkts</th>
                         </tr>
                     </thead>
                     <tbody id="traffic-body">
@@ -254,6 +265,7 @@ function fetchTraffic() {
             // Handle {packets, beacons} response shape
             const beacons = data && data.beacons ? data.beacons : [];
             renderTable();
+            renderAppsSites();
             renderActivitySummary();
             renderSuspicious();
             renderHttpUrls();
@@ -336,7 +348,12 @@ function renderTable() {
     if (!filtered.length) {
         const isIdle = allRows.length === 0;
         tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${isIdle
-            ? '<div class="empty-icon">💤</div>Device is idle — no network traffic detected in this capture window. Try again or use a longer interval.'
+            ? `<div class="empty-icon">💤</div>
+               Device has no visible internet traffic in this window.<br>
+               <span style="font-size:0.78rem;color:var(--text-dim)">
+                 If MITM is not active: only DNS queries are visible (client isolation blocks direct traffic).<br>
+                 Enable MITM above → then restart watching to see all apps &amp; sites.
+               </span>`
             : 'No connections match filter'}</td></tr>`;
         return;
     }
@@ -349,25 +366,75 @@ function renderTable() {
         const bytes    = r.bytes > 1024*1024 ? (r.bytes/1024/1024).toFixed(1)+"MB"
                        : r.bytes > 1024 ? (r.bytes/1024).toFixed(1)+"KB"
                        : r.bytes+"B";
-        const geoFlag  = r.geo_suspicious ? `<span style="color:var(--red)" title="Suspicious country">⚠️ ${r.country||""}</span>`
+        const geoFlag  = r.geo_suspicious
+                       ? `<span style="color:var(--red)">⚠️ ${r.country||""}</span>`
                        : `<span style="color:var(--text-dim);font-size:0.72rem">${r.country||""}</span>`;
+        const domainLabel = r.domain || r.remote_host || r.remote_ip;
         return `<tr style="${rowBg}">
             <td><span style="color:${dirColor};font-weight:600">${dirIcon} ${r.direction}</span></td>
-            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.remote_host}">
-                ${r.remote_host ? `<span style="color:var(--text)">${r.remote_host}</span>` : '<span class="text-dim">—</span>'}
+            <td style="font-size:0.82rem;font-weight:600">${r.app||r.activity||"—"}</td>
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${domainLabel}">
+                <span style="color:var(--cyan);font-size:0.78rem;font-family:'Courier New',monospace">${domainLabel}</span>
             </td>
-            <td class="mono" style="font-size:0.75rem;color:var(--cyan)">${r.remote_ip}</td>
-            <td>
-                <span class="port-tag ${isSusp?'danger':''}" style="font-size:0.7rem;padding:2px 7px">
-                    ${isSusp?"⚠ ":""}${r.remote_port}${r.service && r.service !== r.remote_port ? " <small style='opacity:0.6'>"+r.service+"</small>" : ""}
-                </span>
-            </td>
+            <td class="mono" style="font-size:0.72rem;color:var(--text-dim)">${r.remote_ip}</td>
+            <td><span class="port-tag ${isSusp?'danger':''}" style="font-size:0.7rem;padding:2px 7px">${isSusp?"⚠ ":""}${r.remote_port}</span></td>
             <td><span class="risk-badge low" style="font-size:0.68rem">${r.proto||"?"}</span></td>
-            <td style="font-size:0.8rem;font-weight:500">${r.app||r.activity||"—"}</td>
             <td>${geoFlag}</td>
             <td style="color:var(--yellow);font-family:'Courier New',monospace;font-size:0.75rem">${bytes}</td>
             <td style="color:var(--text-dim);font-size:0.75rem">${r.count}</td>
         </tr>`;
+    }).join("");
+}
+
+function renderAppsSites() {
+    // Group by app label, collect unique domains under each
+    const appMap = {};
+    allRows.forEach(r => {
+        if (r.remote_ip === "DNS" || r.proto === "DNS") return; // DNS entries handled separately
+        const app  = r.app || "📦 Other";
+        const site = r.domain || r.remote_host || "";
+        if (!appMap[app]) appMap[app] = { bytes: 0, count: 0, domains: new Set(), urls: [] };
+        appMap[app].bytes += r.bytes;
+        appMap[app].count += r.count;
+        if (site && site !== r.remote_ip) appMap[app].domains.add(site);
+        (r.http_urls || []).forEach(u => { if (!appMap[app].urls.includes(u)) appMap[app].urls.push(u); });
+    });
+
+    // DNS queries — group by resolved app
+    allRows.filter(r => r.proto === "DNS").forEach(r => {
+        const app  = r.app || "🔍 DNS Lookup";
+        const site = r.domain || r.remote_host || "";
+        if (!appMap[app]) appMap[app] = { bytes: 0, count: 0, domains: new Set(), urls: [] };
+        appMap[app].count += r.count;
+        if (site) appMap[app].domains.add(site);
+    });
+
+    const el = document.getElementById("apps-sites-panel");
+    const sorted = Object.entries(appMap).sort((a,b) => b[1].bytes - a[1].bytes);
+
+    if (!sorted.length) {
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">📱</div>No app activity detected yet</div>';
+        return;
+    }
+
+    el.innerHTML = sorted.map(([app, info]) => {
+        const bytes = info.bytes > 1024*1024 ? (info.bytes/1024/1024).toFixed(1)+"MB"
+                    : info.bytes > 1024      ? (info.bytes/1024).toFixed(1)+"KB"
+                    : info.bytes > 0         ? info.bytes+"B" : "";
+        const domains = [...info.domains].slice(0, 6);
+        const urls    = info.urls.slice(0, 3);
+        return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <span style="font-size:1rem;font-weight:600">${app}</span>
+                <span style="font-size:0.72rem;color:var(--text-dim)">${info.count} pkt${bytes ? " · "+bytes : ""}</span>
+            </div>
+            ${domains.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px">
+                ${domains.map(d => `<span style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:0.72rem;color:var(--cyan);font-family:'Courier New',monospace">${d}</span>`).join("")}
+            </div>` : ""}
+            ${urls.length ? `<div style="margin-top:8px">${urls.map(u =>
+                `<div style="font-size:0.7rem;color:var(--text-dim);font-family:'Courier New',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u}</div>`
+            ).join("")}</div>` : ""}
+        </div>`;
     }).join("");
 }
 

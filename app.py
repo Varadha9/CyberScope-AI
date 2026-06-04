@@ -1,6 +1,6 @@
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO
-from scanner.device_scanner import scan_network, get_wifi_subnet
+from scanner.device_scanner import scan_network, get_wifi_subnet, best_device_name, mac_vendor, vendor_to_label
 from scanner.port_scanner import scan_ports
 from threat.detector import scan_threats
 from ai.behavior_analyzer import analyze
@@ -43,6 +43,7 @@ from sniffer.packet_sniffer import start_sniff
 import threading
 import time
 import os
+import re
 from datetime import datetime
 
 app = Flask(__name__)
@@ -216,6 +217,11 @@ def deep_scan(ip, ports, result):
 
         comment = analyze(ports, services)
 
+        # Re-enrich hostname now that we have more data
+        intel = get_intel(mac=result.get("mac","")) or get_intel(ip=result.get("ip",""))
+        enriched_name = best_device_name(result.get("ip",""), result.get("mac",""), intel)
+        if enriched_name and enriched_name != "Unknown Device":
+            result["hostname"] = enriched_name
         for v in vulns:
             save_alert(f"VULN on {ip}: {v}", "CRITICAL")
             socketio.emit("alert", {"message": f"VULN {ip}: {v}", "severity": "CRITICAL"})
@@ -359,13 +365,13 @@ def run_scan():
             "ipv6": ipv6_addr or "",
         }
         intel = get_intel(mac=mac) or get_intel(ip=ip)
+        hostname = best_device_name(ip, mac, intel)
         if intel:
-            if intel.get("hostname") and result["hostname"] in ("unknown", ""):
-                result["hostname"] = intel["hostname"]
             if intel.get("os_hint"):
                 result["os"] = intel["os_hint"]
             result["device_type"] = intel.get("device_type", "")
             result["intel_sources"] = intel.get("sources", [])
+        result["hostname"] = hostname
         results.append(result)
         save_scan_result(ip, result)
 
@@ -877,29 +883,73 @@ def api_camera_test_creds():
 
 @app.route("/api/camera/intercept/<ip>")
 def api_camera_intercept(ip):
-    """Start MITM + hash capture on camera. Runs in background."""
+    """Start MITM + hash capture on camera. Runs in background, pushes live status via WebSocket."""
     def run():
         import subprocess, os
         env = os.environ.copy()
-        # Pass sudo password from environment — never hardcode
         sudo_pass = os.environ.get("CYBERSCOPE_SUDO_PASS", "")
         if sudo_pass:
             env["CYBERSCOPE_SUDO_PASS"] = sudo_pass
         log(f'[Camera] Starting credential interceptor on {ip}...', 'warn')
         log(f'[Camera] Open http://{ip} in browser and log in to capture hash', 'warn')
+        socketio.emit('camera_intercept_status', {
+            'ip': ip,
+            'stage': 'mitm_starting',
+            'message': f'ARP spoof starting on {ip} — MITM active'
+        })
         socketio.emit('alert', {'message': f'MITM interceptor active on {ip} - waiting for login', 'severity': 'MEDIUM'})
         try:
             out = subprocess.check_output(
                 ['python3', 'kali_tools/cam_interceptor.py', ip],
-                env=env, text=True, timeout=360
+                env=env, text=True, timeout=180
             )
+            cracked_user, cracked_pass = None, None
             for line in out.splitlines():
-                log(f'[Interceptor] {line}', 'warn' if 'CRACKED' in line or 'FOUND' in line else 'info')
+                log(f'[Interceptor] {line}', 'warn' if any(k in line for k in ['CRACKED','CRACK','FOUND','CAMERA ACCESS','cracked:']) else 'info')
+                # Parse cracked credentials — matches all output formats:
+                # "[+] INSTANT CRACK: admin:12345"
+                # "[+] hashcat (fast-list) cracked: admin:12345"
+                # "[+] Offline MD5 (rockyou line N): admin:12345"
+                m_instant = re.search(r'INSTANT CRACK:\s*(\S+):(\S+)', line)
+                m_cracked = re.search(r'cracked:\s*(\S+):(\S+)', line, re.IGNORECASE)
+                m_cred    = re.search(r'(?:cracked|login|found)[:\s]+([\w@.]+):(.+)', line, re.IGNORECASE)
+                m = m_instant or m_cracked or m_cred
+                if m and not cracked_user:
+                    cracked_user = m.group(1).strip()
+                    cracked_pass = m.group(2).strip()
+                # Emit stage updates to UI
+                if 'Layer 1' in line or 'Passive sniff' in line:
+                    socketio.emit('camera_intercept_status', {'ip': ip, 'stage': 'mitm_starting', 'message': line.strip()})
+                elif 'Layer 2' in line or 'ARP MITM' in line or 'MITM active' in line:
+                    socketio.emit('camera_intercept_status', {'ip': ip, 'stage': 'mitm_starting', 'message': line.strip()})
+                elif 'Layer 3' in line or 'sslstrip' in line:
+                    socketio.emit('camera_intercept_status', {'ip': ip, 'stage': 'mitm_starting', 'message': line.strip()})
+                elif 'Layer 4' in line or 'Active sniff' in line or 'LOG IN NOW' in line:
+                    socketio.emit('camera_intercept_status', {'ip': ip, 'stage': 'sniffing', 'message': line.strip()})
+                elif 'Hash captured' in line or 'crack pipeline' in line or 'hashcat' in line.lower() or 'john' in line.lower() or 'Offline MD5' in line:
+                    socketio.emit('camera_intercept_status', {'ip': ip, 'stage': 'cracking', 'message': line.strip()})
                 if 'PASSWORD CRACKED' in line or 'CAMERA ACCESS' in line:
                     socketio.emit('alert', {'message': f'CAMERA {ip}: {line}', 'severity': 'CRITICAL'})
                     save_alert(f'CAMERA {ip}: {line}', 'CRITICAL')
+            # Emit final result with credentials
+            if cracked_user and cracked_pass:
+                socketio.emit('camera_cracked', {
+                    'ip': ip,
+                    'username': cracked_user,
+                    'password': cracked_pass,
+                    'stream_url': f'rtsp://{cracked_user}:{cracked_pass}@{ip}:554/Streaming/Channels/101'
+                })
+                log(f'[Camera] ✓ CRACKED {ip}: {cracked_user}:{cracked_pass}', 'warn')
+            else:
+                socketio.emit('camera_intercept_status', {
+                    'ip': ip, 'stage': 'done',
+                    'message': 'Intercept complete — check activity log'
+                })
         except Exception as e:
             log(f'[Interceptor] Error: {e}', 'error')
+            socketio.emit('camera_intercept_status', {
+                'ip': ip, 'stage': 'error', 'message': str(e)
+            })
     threading.Thread(target=run, daemon=True).start()
     return jsonify({'status': 'started', 'message': f'Interceptor running on {ip} - open camera web UI and log in'})
 

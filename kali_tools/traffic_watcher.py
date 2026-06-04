@@ -162,50 +162,59 @@ IP_ORG_MAP = [
 
 # ── SNI/hostname → App fingerprint ─────────────────────────────────────────
 SNI_APP_MAP = [
-    # WhatsApp
-    (r"whatsapp|wa\.me|wam\.|w\.net|whatsapp\.net", "💬 WhatsApp"),
-    # Instagram
-    (r"instagram|cdninstagram|ig-", "📸 Instagram"),
+    # Order matters — most specific patterns first
+    # WhatsApp (must be before Facebook)
+    (r"whatsapp\.net|wa\.me|wam\.|static\.whatsapp\.net", "💬 WhatsApp"),
+    # Instagram (must be before Facebook)
+    (r"instagram\.com|cdninstagram\.com|ig-|\.ig\.", "📸 Instagram"),
     # Facebook
-    (r"facebook|fbcdn|graph\.facebook|fb\.com", "👤 Facebook"),
-    # YouTube
-    (r"youtube|ytimg|googlevideo|yt3\.|youtu\.be", "▶️ YouTube"),
-    # Google services
-    (r"googleapis|gstatic|google\.com|gvt1|gvt2|1e100|ggpht", "🔍 Google"),
-    # Gmail
-    (r"gmail|mail\.google", "📧 Gmail"),
-    # Google Play
-    (r"play\.google|android\.clients\.google|goog\.gl", "🎮 Google Play"),
-    # Chrome / browser
-    (r"safebrowsing|update\.googleapis|chrome|chromium", "🌐 Chrome Browser"),
-    # Twitter/X
-    (r"twitter|twimg|t\.co|abs\.twimg", "🐦 Twitter / X"),
+    (r"facebook\.com|fbcdn\.net|graph\.facebook|fb\.com", "👤 Facebook"),
+    # YouTube (must be before Google)
+    (r"youtube\.com|ytimg\.com|googlevideo\.com|yt3\.|youtu\.be", "▶️ YouTube"),
+    # Gmail (must be before Google)
+    (r"gmail\.com|mail\.google\.com", "📧 Gmail"),
+    # Google Play (before Google)
+    (r"play\.google\.com|android\.clients\.google", "🎮 Google Play"),
+    # Chrome browser update/safe-browsing (before Google)
+    (r"safebrowsing\.google|update\.googleapis\.com", "🌐 Chrome Browser"),
+    # Google
+    (r"google\.com|googleapis\.com|gstatic\.com|gvt1\.com|1e100\.net|ggpht\.com", "🔍 Google"),
+    # ChatGPT / OpenAI
+    (r"chatgpt\.com|openai\.com|oaistatic\.com|oaiusercontent\.com", "🤖 ChatGPT"),
+    # Twitter/X (exact domains only)
+    (r"twitter\.com|x\.com|twimg\.com|abs\.twimg\.com", "🐦 Twitter / X"),
     # Snapchat
-    (r"snapchat|sc-cdn|snap\.com", "👻 Snapchat"),
+    (r"snapchat\.com|sc-cdn\.net|snap\.com", "👻 Snapchat"),
     # TikTok
-    (r"tiktok|musical\.ly|bytedance|tiktokcdn|ibytedtos", "🎵 TikTok"),
+    (r"tiktok\.com|musical\.ly|bytedance\.com|tiktokcdn\.com|ibytedtos\.com", "🎵 TikTok"),
     # Telegram
-    (r"telegram|t\.me|tdesktop|core\.telegram", "✈️ Telegram"),
+    (r"telegram\.org|t\.me|tdesktop\.com|core\.telegram\.org", "✈️ Telegram"),
     # Spotify
-    (r"spotify|scdn\.co|audio-sp-", "🎵 Spotify"),
+    (r"spotify\.com|scdn\.co|audio-sp-", "🎵 Spotify"),
     # Netflix
-    (r"netflix|nflx|fast\.com", "🎬 Netflix"),
-    # Amazon
-    (r"amazon|amazonaws|cloudfront|aws", "🛒 Amazon"),
-    # Microsoft
-    (r"microsoft|live\.com|outlook|office|xbox|msedge|windows|azure|hotmail", "🪟 Microsoft"),
-    # Apple
-    (r"apple|icloud|itunes|mzstatic|aaplimg", "🍎 Apple"),
+    (r"netflix\.com|nflx\.net|fast\.com", "🎬 Netflix"),
     # Zoom
-    (r"zoom\.us|zoomgov", "📹 Zoom"),
+    (r"zoom\.us|zoomgov\.com", "📹 Zoom"),
+    # Microsoft Teams / Office
+    (r"teams\.microsoft|office\.com|sharepoint\.com|office365\.com", "👥 Microsoft Teams"),
+    # Microsoft / Azure / Windows Update
+    (r"microsoft\.com|live\.com|outlook\.com|xbox\.com|msedge\.net|windowsupdate\.com|azure\.com|hotmail\.com", "🪟 Microsoft"),
+    # Apple / iCloud
+    (r"apple\.com|icloud\.com|itunes\.com|mzstatic\.com|aaplimg\.com|apple-dns\.net", "🍎 Apple"),
+    # Amazon Shopping / Prime
+    (r"amazon\.com|amazon\.in|primevideo\.com", "🛒 Amazon"),
+    # AWS (after Amazon)
+    (r"amazonaws\.com|cloudfront\.net|awsstatic\.com", "☁️ AWS"),
     # Jio
-    (r"jio|reliance|jiocloud|jiosaavn|jiotv", "📡 Jio"),
+    (r"jio\.com|reliance\.com|jiocloud\.com|jiosaavn\.com|jiotv\.com", "📡 Jio"),
     # Hikvision
-    (r"hikvision|hik-connect|ezviz", "📷 Hikvision"),
+    (r"hikvision\.com|hik-connect\.com|ezviz\.com", "📷 Hikvision"),
     # GitHub
-    (r"github|gitlab|githubusercontent", "💻 GitHub"),
+    (r"github\.com|gitlab\.com|githubusercontent\.com", "💻 GitHub"),
     # Cloudflare
-    (r"cloudflare|1\.1\.1\.1|1\.0\.0\.1", "☁️ Cloudflare"),
+    (r"cloudflare\.com|1\.1\.1\.1|1\.0\.0\.1", "☁️ Cloudflare"),
+    # QuillBot
+    (r"quillbot\.com", "✍️ QuillBot"),
 ]
 
 _hostname_cache = {}
@@ -343,14 +352,43 @@ def _get_active_iface():
 
 def watch_ip(ip, iface="wlan0", count=9999, timeout=20):
     seen = {}
+    dns_map = {}  # domain -> resolved IP, for enriching HTTPS connections
 
-    # Auto-detect interface if wlan0 doesn't exist
     import os
     if not os.path.exists(f"/sys/class/net/{iface}"):
         iface = _get_active_iface()
 
-    # Refresh own IPs at call time (app may have started before network was up)
     own_ips = _get_own_ips()
+
+    # Get the subnet prefix so we can exclude local-to-local traffic
+    # and only keep target <-> internet or target <-> gateway flows
+    try:
+        import ipaddress
+        own_ip_list = [i for i in own_ips if not i.startswith("127.")]
+        own_net = None
+        if own_ip_list:
+            # e.g. 10.50.101.69 → 10.50.64.0/18
+            out = subprocess.check_output(["ip", "route", "show", "default"], text=True)
+            gw_iface = re.search(r"dev (\S+)", out)
+            if gw_iface:
+                cidr_out = subprocess.check_output(
+                    ["ip", "-o", "-f", "inet", "addr", "show", gw_iface.group(1)], text=True)
+                m = re.search(r"inet (\S+)", cidr_out)
+                if m:
+                    own_net = ipaddress.ip_network(m.group(1), strict=False)
+    except Exception:
+        own_net = None
+
+    def _is_local(addr):
+        """True if addr is on the same LAN (not internet)."""
+        if addr.startswith(("127.", "224.", "239.", "255.")):
+            return True
+        try:
+            if own_net and ipaddress.ip_address(addr) in own_net:
+                return True
+        except Exception:
+            pass
+        return False
 
     out = _run_tshark([
         "-i", iface, "-c", str(count),
@@ -400,7 +438,7 @@ def watch_ip(ip, iface="wlan0", count=9999, timeout=20):
         sport = tcp_sp or udp_sp
         dport = tcp_dp or udp_dp
 
-        # Direction from the target device's perspective
+        # Direction from target device's perspective
         if src == ip:
             direction   = "OUT"
             remote_ip   = dst
@@ -412,18 +450,21 @@ def watch_ip(ip, iface="wlan0", count=9999, timeout=20):
 
         if not remote_ip or remote_ip == ip:
             continue
-        # Skip multicast / broadcast
         if remote_ip.startswith("224.") or remote_ip.startswith("239.") or remote_ip.endswith(".255"):
             continue
 
-        # ── Label our own IP as "This Scanner" instead of dropping it ──
-        is_scanner = remote_ip in own_ips
+        # Skip scanner's own traffic to target (CyberScope polling)
+        if remote_ip in own_ips:
+            continue
 
-        # DNS query
+        # ── DNS query: always show (tells us what sites the device is visiting) ──
         if dns_name and src == ip:
+            # Cache domain for enriching subsequent HTTPS connections
+            if remote_ip and remote_ip != "DNS":
+                dns_map[remote_ip] = dns_name
             key = ("dns", dns_name)
+            app = _fingerprint(dns_name, "", remote_ip, 53)
             if key not in seen:
-                app = _fingerprint(dns_name, "", remote_ip, 53)
                 seen[key] = {
                     "direction":   "OUT",
                     "remote_ip":   "DNS",
@@ -437,31 +478,27 @@ def watch_ip(ip, iface="wlan0", count=9999, timeout=20):
                     "http_urls":   [],
                     "timestamps":  [],
                     "country":     "",
+                    "domain":      dns_name,
                 }
             else:
                 seen[key]["count"] += 1
             continue
 
-        remote_host = "This Scanner" if is_scanner else _resolve(remote_ip)
-        display     = sni or hhost or (remote_host if remote_host != remote_ip else "")
-        country     = _geo_country(remote_ip) if not is_scanner else ""
+        # ── Skip pure LAN traffic (device talking to other local IPs) unless
+        #    it's port 53 DNS or a gateway (which forwards to internet) ──
+        is_internet = not _is_local(remote_ip)
+        if not is_internet and int(remote_port or 0) not in (53, 67, 68, 5353, 123):
+            continue
 
-        if is_scanner:
-            target_port = (tcp_dp or udp_dp) if src in own_ips else (tcp_sp or udp_sp)
-            svc_label   = PORT_LABELS.get(int(target_port) if str(target_port).isdigit() else 0, target_port or "?")
-            key         = ("scanner", svc_label, proto)
-            service     = svc_label
-            display_port = svc_label
-            app         = "\U0001f52c CyberScope Scanner"
-        else:
-            target_port  = remote_port
-            svc_label    = PORT_LABELS.get(int(remote_port) if str(remote_port).isdigit() else 0, remote_port or "?")
-            key          = (remote_ip, remote_port, proto)
-            service      = svc_label
-            display_port = remote_port
-            app          = _fingerprint(sni, hhost, remote_ip, remote_port)
+        best_name   = sni or hhost or dns_map.get(remote_ip, "")
+        remote_host = _resolve(remote_ip)
+        display     = best_name or (remote_host if remote_host != remote_ip else remote_ip)
 
-        ts = frame_time[:10] if frame_time else ""
+        svc_label   = PORT_LABELS.get(int(remote_port) if str(remote_port).isdigit() else 0, remote_port or "?")
+        key         = (remote_ip, remote_port, proto)
+        app         = _fingerprint(best_name, best_name, remote_ip, remote_port)
+        country     = _geo_country(remote_ip)
+
         http_url = ""
         if hmethod and http_uri:
             http_url = f"{hmethod} http://{hhost or remote_ip}{http_uri}"
@@ -471,20 +508,21 @@ def watch_ip(ip, iface="wlan0", count=9999, timeout=20):
         if key in seen:
             seen[key]["bytes"] += int(length) if length.isdigit() else 0
             seen[key]["count"] += 1
-            if (sni or hhost) and seen[key]["remote_host"] in ("", remote_ip):
+            if best_name and seen[key]["remote_host"] in ("", remote_ip):
                 seen[key]["remote_host"] = display
+                seen[key]["domain"]      = best_name
                 seen[key]["app"]         = app
             if http_url and http_url not in seen[key]["http_urls"]:
                 seen[key]["http_urls"].append(http_url)
-            if ts and len(seen[key]["timestamps"]) < 60:
+            if frame_time and len(seen[key]["timestamps"]) < 60:
                 seen[key]["timestamps"].append(float(frame_time))
         else:
             seen[key] = {
                 "direction":   direction,
                 "remote_ip":   remote_ip,
                 "remote_host": display,
-                "remote_port": display_port,
-                "service":     service,
+                "remote_port": remote_port or "?",
+                "service":     svc_label,
                 "proto":       proto,
                 "app":         app,
                 "bytes":       int(length) if length.isdigit() else 0,
@@ -492,9 +530,9 @@ def watch_ip(ip, iface="wlan0", count=9999, timeout=20):
                 "http_urls":   [http_url] if http_url else [],
                 "timestamps":  [float(frame_time)] if frame_time else [],
                 "country":     country,
+                "domain":      best_name,
             }
 
-    # Sort: outgoing first, then by bytes descending
     packets = sorted(seen.values(),
                      key=lambda x: (0 if x["direction"] == "OUT" else 1, -x["bytes"]))
     return packets[:100]

@@ -33,11 +33,25 @@
     </div>
 
     <div class="page">
-        <!-- WiFi Scanner -->
+
+        <!-- Quick Actions Bar -->
+        <div class="controls-bar" style="margin-bottom:20px">
+            <button class="btn btn-primary" onclick="scanWiFi()">📡 Scan WiFi APs</button>
+            <button class="btn btn-cyan" onclick="runDNSLogger()">🔍 DNS Logger (15s)</button>
+            <button class="btn btn-cyan" onclick="runPassiveHarvest()">🕵️ Passive Intel (30s)</button>
+            <button class="btn btn-cyan" onclick="runPassiveFP()">🖥️ OS Fingerprint</button>
+            <button class="btn" onclick="loadCVEs()">🔥 Load CVEs</button>
+            <button class="btn" onclick="loadNDPTable()">🔗 NDP / ARP Table</button>
+        </div>
+
+        <!-- WiFi Access Points -->
         <div class="panel section-gap">
             <div class="panel-header">
                 <div class="panel-title">📡 WiFi Access Points</div>
-                <button class="btn btn-sm btn-primary" onclick="scanWiFi()">🔄 Scan WiFi</button>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span class="text-dim" id="wifi-count" style="font-size:0.75rem"></span>
+                    <button class="btn btn-sm btn-primary" onclick="scanWiFi()">🔄 Scan</button>
+                </div>
             </div>
             <div class="panel-body no-pad" id="wifi-panel">
                 <div class="empty-state"><div class="empty-icon">📡</div>Click Scan WiFi to discover nearby access points</div>
@@ -47,35 +61,83 @@
         <!-- Rogue AP Detection -->
         <div class="panel section-gap">
             <div class="panel-header">
-                <div class="panel-title">⚠️ Rogue AP Detection</div>
+                <div class="panel-title">⚠️ Rogue AP / Evil Twin Detection</div>
                 <span class="text-dim" style="font-size:0.72rem">Evil twins, open networks, hidden SSIDs</span>
             </div>
             <div class="panel-body" id="rogue-panel">
-                <div class="empty-state"><div class="empty-icon">🛡️</div>No rogue APs detected</div>
+                <div class="empty-state"><div class="empty-icon">🛡️</div>Run WiFi scan first</div>
             </div>
         </div>
 
-        <!-- CVE Lookup -->
+        <!-- DNS Logger -->
         <div class="panel section-gap">
             <div class="panel-header">
-                <div class="panel-title">🔥 CVE Vulnerability Database</div>
-                <span class="text-dim" style="font-size:0.72rem">Real-time NVD API lookup for detected services</span>
+                <div class="panel-title">🔍 Live DNS Query Logger</div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span class="text-dim" id="dns-count" style="font-size:0.75rem"></span>
+                    <button class="btn btn-sm btn-cyan" onclick="runDNSLogger()">▶ Capture 15s</button>
+                    <button class="btn btn-sm btn-danger" onclick="runDNSLogger(60)">▶ Capture 60s</button>
+                </div>
             </div>
-            <div class="panel-body" id="cve-panel">
-                <div class="empty-state"><div class="empty-icon">🔍</div>Run a scan first to detect services and lookup CVEs</div>
+            <div class="panel-body no-pad" id="dns-panel">
+                <div class="empty-state"><div class="empty-icon">🔍</div>Click Capture to sniff DNS queries from all devices on the network</div>
+            </div>
+        </div>
+
+        <!-- Passive Intelligence -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">🕵️ Passive Device Intelligence (DHCP / mDNS / NetBIOS)</div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span class="text-dim" id="intel-count" style="font-size:0.75rem"></span>
+                    <button class="btn btn-sm btn-cyan" onclick="runPassiveHarvest()">▶ Harvest 30s</button>
+                    <button class="btn btn-sm" onclick="runPassiveHarvest(60)">▶ Harvest 60s</button>
+                </div>
+            </div>
+            <div class="panel-body no-pad" id="intel-panel">
+                <div class="empty-state"><div class="empty-icon">🕵️</div>Click Harvest to capture device names from DHCP/mDNS/NetBIOS broadcasts</div>
+            </div>
+        </div>
+
+        <!-- NDP / ARP Table -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">🔗 NDP / ARP Table (MAC ↔ IPv6 Mapping)</div>
+                <button class="btn btn-sm" onclick="loadNDPTable()">🔄 Refresh</button>
+            </div>
+            <div class="panel-body no-pad" id="ndp-panel">
+                <div class="empty-state"><div class="empty-icon">🔗</div>Click Refresh to load NDP/ARP table</div>
             </div>
         </div>
 
         <!-- Passive OS Fingerprinting -->
         <div class="panel section-gap">
             <div class="panel-header">
-                <div class="panel-title">🕵️ Passive OS Fingerprinting</div>
-                <button class="btn btn-sm btn-cyan" onclick="runPassiveFP()">▶ Run Fingerprinting</button>
+                <div class="panel-title">🖥️ Passive OS Fingerprinting (TTL + Port Analysis)</div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span class="text-dim" id="fp-count" style="font-size:0.75rem"></span>
+                    <button class="btn btn-sm btn-cyan" onclick="runPassiveFP()">▶ Fingerprint All</button>
+                </div>
             </div>
             <div class="panel-body no-pad" id="fp-panel">
-                <div class="empty-state"><div class="empty-icon">🕵️</div>Click Run to fingerprint all devices via TTL analysis</div>
+                <div class="empty-state"><div class="empty-icon">🖥️</div>Click Fingerprint All to detect OS via TTL + open port analysis</div>
             </div>
         </div>
+
+        <!-- CVE Database -->
+        <div class="panel section-gap">
+            <div class="panel-header">
+                <div class="panel-title">🔥 CVE Vulnerabilities Found (NVD API)</div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span class="text-dim" id="cve-count" style="font-size:0.75rem"></span>
+                    <button class="btn btn-sm btn-danger" onclick="loadCVEs()">🔄 Reload CVEs</button>
+                </div>
+            </div>
+            <div class="panel-body" id="cve-panel">
+                <div class="empty-state"><div class="empty-icon">🔍</div>Run a full scan first, then click Reload CVEs</div>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -85,45 +147,53 @@ setInterval(() => { document.getElementById("clock").textContent = new Date().to
 const socket = io();
 socket.on("alert", (data) => {
     if (data.message.includes("EVIL TWIN") || data.message.includes("OPEN WIFI")) {
-        scanWiFi(); // Auto-refresh on rogue AP alert
+        scanWiFi();
     }
 });
 
+// ── WiFi Scan ──────────────────────────────────────────────────────────────────
+
 function scanWiFi() {
-    document.getElementById("status-badge").textContent = "Scanning WiFi...";
-    document.getElementById("wifi-panel").innerHTML = '<div class="empty-state">Scanning nearby access points (15s)...</div>';
+    setBadge("Scanning WiFi...");
+    document.getElementById("wifi-panel").innerHTML = '<div class="empty-state">⏳ Scanning nearby access points (15s)...</div>';
+    document.getElementById("rogue-panel").innerHTML = '<div class="empty-state">⏳ Waiting for scan...</div>';
     fetch("/api/wifi_scan")
         .then(r => r.json())
         .then(data => {
-            document.getElementById("status-badge").textContent = data.aps.length + " APs found";
+            setBadge(data.aps.length + " APs found");
+            document.getElementById("wifi-count").textContent = data.aps.length + " access points";
             renderWiFi(data.aps, data.connected);
             renderRogues(data.rogues);
         })
-        .catch(() => {
-            document.getElementById("status-badge").textContent = "Scan failed";
-            document.getElementById("wifi-panel").innerHTML = '<div class="empty-state" style="color:var(--red)">WiFi scan failed — run with sudo</div>';
+        .catch(err => {
+            setBadge("Scan failed");
+            document.getElementById("wifi-panel").innerHTML = `<div class="empty-state" style="color:var(--red)">❌ WiFi scan failed — make sure wlan0 is up and run with sudo<br><small>${err}</small></div>`;
         });
 }
 
 function renderWiFi(aps, connected) {
     const el = document.getElementById("wifi-panel");
     if (!aps.length) {
-        el.innerHTML = '<div class="empty-state">No access points found</div>';
+        el.innerHTML = '<div class="empty-state">No access points found — try running: sudo iwlist wlan0 scan</div>';
         return;
     }
-    const connSSID = connected.ssid || "";
+    const connSSID = (connected && connected.ssid) ? connected.ssid : "";
     el.innerHTML = `<table class="device-table">
-        <thead><tr><th>SSID</th><th>BSSID</th><th>Channel</th><th>Signal</th><th>Encryption</th><th>Status</th></tr></thead>
+        <thead><tr>
+            <th>SSID</th><th>BSSID / MAC</th><th>Ch</th>
+            <th>Signal</th><th>Encryption</th><th>Status</th>
+        </tr></thead>
         <tbody>${aps.map(ap => {
-            const isConn = ap.ssid === connSSID;
+            const isConn = ap.ssid === connSSID && connSSID;
             const rowBg = isConn ? "background:#00ff8811" : ap.encryption.includes("Open") ? "background:#ff444408" : "";
+            const encCls = ap.encryption.includes("Open") ? "high" : ap.encryption.includes("WPA3") ? "safe" : "low";
             return `<tr style="${rowBg}">
-                <td style="font-weight:${isConn?'700':'400'}">${ap.ssid || "<hidden>"} ${isConn ? "✓" : ""}</td>
-                <td class="mono" style="font-size:0.75rem;color:var(--text-dim)">${ap.mac}</td>
-                <td>${ap.channel}</td>
-                <td>${ap.signal}</td>
-                <td><span class="risk-badge ${ap.encryption.includes('Open') ? 'high' : ap.encryption.includes('WPA3') ? 'safe' : 'low'}">${ap.encryption}</span></td>
-                <td>${isConn ? '<span style="color:var(--green)">● Connected</span>' : ""}</td>
+                <td style="font-weight:${isConn?'700':'400'};color:${isConn?'var(--green)':'var(--text)'}">${ap.ssid || "⟨hidden⟩"} ${isConn?"✓":""}</td>
+                <td class="mac-text" style="font-size:0.72rem">${ap.mac || "—"}</td>
+                <td>${ap.channel || "—"}</td>
+                <td style="color:${parseInt(ap.signal)<-70?'var(--red)':parseInt(ap.signal)<-50?'var(--yellow)':'var(--green)'}">${ap.signal || "—"}</td>
+                <td><span class="risk-badge ${encCls}">${ap.encryption || "Unknown"}</span></td>
+                <td>${isConn ? '<span style="color:var(--green);font-weight:700">● Connected</span>' : '<span style="color:var(--text-dim)">—</span>'}</td>
             </tr>`;
         }).join("")}</tbody>
     </table>`;
@@ -132,19 +202,212 @@ function renderWiFi(aps, connected) {
 function renderRogues(rogues) {
     const el = document.getElementById("rogue-panel");
     if (!rogues.length) {
-        el.innerHTML = '<div class="empty-state"><div class="empty-icon">🛡️</div>No rogue APs detected — network is clean</div>';
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">🛡️</div>No rogue APs detected — network appears clean</div>';
         return;
     }
     el.innerHTML = rogues.map(r => {
         const cls = r.severity === "CRITICAL" ? "critical" : r.severity === "HIGH" ? "high" : "medium";
-        return `<div class="finding-item ${cls}" style="margin-bottom:8px">
-            <strong>${r.type.replace(/_/g, " ")}</strong> — ${r.ssid} (${r.mac})<br>
-            <span style="font-size:0.78rem;color:var(--text-dim)">${r.detail}</span>
+        const icon = r.type === "EVIL_TWIN" ? "👥" : r.type === "OPEN_NETWORK" ? "🔓" : "❓";
+        return `<div class="finding-item ${cls}" style="margin-bottom:10px;padding:12px 16px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                <strong>${icon} ${r.type.replace(/_/g," ")}</strong>
+                <span class="risk-badge ${cls}">${r.severity}</span>
+            </div>
+            <div style="font-size:0.85rem;margin-bottom:2px">SSID: <strong>${r.ssid}</strong>  MAC: ${r.mac}</div>
+            <div style="font-size:0.78rem;color:var(--text-dim)">${r.detail}</div>
         </div>`;
     }).join("");
 }
 
+// ── DNS Logger ────────────────────────────────────────────────────────────────
+
+function runDNSLogger(secs) {
+    const timeout = secs || 15;
+    setBadge("Capturing DNS...");
+    document.getElementById("dns-panel").innerHTML = `<div class="empty-state">⏳ Sniffing DNS queries for ${timeout}s... (tshark on wlan0)</div>`;
+    document.getElementById("dns-count").textContent = "";
+
+    fetch(`/api/dns_subnet?timeout=${timeout}&count=500`)
+        .then(r => r.json())
+        .then(data => {
+            const ips = Object.keys(data);
+            const total = ips.reduce((s, ip) => s + data[ip].length, 0);
+            document.getElementById("dns-count").textContent = `${ips.length} device(s), ${total} domains`;
+            setBadge(total + " DNS queries");
+            renderDNS(data);
+        })
+        .catch(err => {
+            setBadge("DNS failed");
+            document.getElementById("dns-panel").innerHTML = `<div class="empty-state" style="color:var(--red)">❌ DNS capture failed: ${err}</div>`;
+        });
+}
+
+function renderDNS(data) {
+    const el = document.getElementById("dns-panel");
+    const ips = Object.keys(data);
+    if (!ips.length) {
+        el.innerHTML = '<div class="empty-state">No DNS queries captured — try increasing timeout or check tshark is installed</div>';
+        return;
+    }
+    el.innerHTML = `<table class="device-table">
+        <thead><tr><th>Device IP</th><th>Domains Queried</th><th>Count</th></tr></thead>
+        <tbody>${ips.sort().map(ip => {
+            const domains = data[ip] || [];
+            const domainHtml = domains.slice(0, 20).map(d => {
+                const app = _appFromDomain(d);
+                return `<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 7px;border-radius:10px;font-size:0.7rem;background:var(--bg3);color:var(--cyan);border:1px solid var(--border)" title="${d}">${app || d}</span>`;
+            }).join("") + (domains.length > 20 ? `<span style="font-size:0.7rem;color:var(--text-dim)"> +${domains.length-20} more</span>` : "");
+            return `<tr>
+                <td><a href="/watch/${ip}" style="color:var(--cyan);font-family:'Courier New',monospace">${ip}</a></td>
+                <td>${domainHtml}</td>
+                <td><span class="risk-badge low">${domains.length}</span></td>
+            </tr>`;
+        }).join("")}</tbody>
+    </table>`;
+}
+
+function _appFromDomain(d) {
+    d = d.toLowerCase();
+    if (d.includes("google")) return "🔍 Google";
+    if (d.includes("youtube") || d.includes("ytimg") || d.includes("googlevideo")) return "▶️ YouTube";
+    if (d.includes("facebook") || d.includes("fbcdn")) return "👤 Facebook";
+    if (d.includes("instagram") || d.includes("cdninstagram")) return "📸 Instagram";
+    if (d.includes("whatsapp")) return "💬 WhatsApp";
+    if (d.includes("tiktok") || d.includes("bytedance")) return "🎵 TikTok";
+    if (d.includes("netflix") || d.includes("nflx")) return "🎬 Netflix";
+    if (d.includes("amazon") || d.includes("amazonaws")) return "🛒 Amazon";
+    if (d.includes("microsoft") || d.includes("live.com") || d.includes("outlook") || d.includes("azure")) return "🪟 Microsoft";
+    if (d.includes("apple") || d.includes("icloud") || d.includes("mzstatic")) return "🍎 Apple";
+    if (d.includes("spotify") || d.includes("scdn.co")) return "🎵 Spotify";
+    if (d.includes("zoom.us")) return "📹 Zoom";
+    if (d.includes("telegram") || d.includes("t.me")) return "✈️ Telegram";
+    if (d.includes("twitter") || d.includes("twimg")) return "🐦 Twitter/X";
+    if (d.includes("snapchat") || d.includes("sc-cdn")) return "👻 Snapchat";
+    if (d.includes("jio") || d.includes("reliance")) return "📡 Jio";
+    if (d.includes("cloudflare") || d.includes("1.1.1")) return "☁️ Cloudflare";
+    if (d.includes("hikvision") || d.includes("hik-connect")) return "📷 Hikvision";
+    return null;
+}
+
+// ── Passive Intel ─────────────────────────────────────────────────────────────
+
+function runPassiveHarvest(secs) {
+    const timeout = secs || 30;
+    setBadge("Harvesting...");
+    document.getElementById("intel-panel").innerHTML = `<div class="empty-state">⏳ Passive intelligence harvest (${timeout}s)... listening for DHCP/mDNS/NetBIOS/SSDP</div>`;
+    document.getElementById("intel-count").textContent = "";
+
+    fetch(`/api/passive_intel/harvest?timeout=${timeout}`)
+        .then(r => r.json())
+        .then(data => {
+            const n = data.harvested || 0;
+            document.getElementById("intel-count").textContent = `${n} device(s) identified, ${data.added||0} new, ${data.enriched||0} enriched`;
+            setBadge(n + " harvested");
+            renderIntel(data.intel || {});
+        })
+        .catch(err => {
+            setBadge("Harvest failed");
+            document.getElementById("intel-panel").innerHTML = `<div class="empty-state" style="color:var(--red)">❌ Harvest failed: ${err}</div>`;
+        });
+}
+
+function renderIntel(intel) {
+    const el = document.getElementById("intel-panel");
+    const entries = Object.values(intel);
+    if (!entries.length) {
+        el.innerHTML = '<div class="empty-state">No passive intel captured — no DHCP/mDNS/NetBIOS traffic seen. Try a 60s harvest.</div>';
+        return;
+    }
+    el.innerHTML = `<table class="device-table">
+        <thead><tr><th>MAC</th><th>IP</th><th>Hostname</th><th>OS / Device Type</th><th>Sources</th></tr></thead>
+        <tbody>${entries.filter(d => d.hostname || d.device_type).map(d => `<tr>
+            <td class="mac-text" style="font-size:0.72rem">${d.mac || "—"}</td>
+            <td style="color:var(--cyan);font-family:'Courier New',monospace">${d.ip || "—"}</td>
+            <td style="font-weight:600">${d.hostname || "—"}</td>
+            <td style="color:var(--text-dim)">${d.device_type || d.os_hint || "—"}</td>
+            <td>${(d.sources||[]).map(s=>`<span class="risk-badge low" style="margin:1px">${s}</span>`).join("")}</td>
+        </tr>`).join("")}</tbody>
+    </table>`;
+}
+
+// ── NDP / ARP Table ───────────────────────────────────────────────────────────
+
+function loadNDPTable() {
+    setBadge("Loading NDP...");
+    document.getElementById("ndp-panel").innerHTML = '<div class="empty-state">⏳ Reading NDP/ARP table...</div>';
+    fetch("/api/ndp_table")
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById("ndp-panel").innerHTML = "";
+            setBadge(data.length + " entries");
+            if (!data.length) {
+                document.getElementById("ndp-panel").innerHTML = '<div class="empty-state">No NDP entries found — IPv6 may not be active on this network</div>';
+                return;
+            }
+            document.getElementById("ndp-panel").innerHTML = `<table class="device-table">
+                <thead><tr><th>MAC Address</th><th>IPv4</th><th>IPv6 Link-Local</th></tr></thead>
+                <tbody>${data.map(e => `<tr>
+                    <td class="mac-text" style="font-size:0.72rem">${e.mac || "—"}</td>
+                    <td style="color:var(--cyan);font-family:'Courier New',monospace">${e.ipv4 || "—"}</td>
+                    <td style="font-family:'Courier New',monospace;font-size:0.72rem;color:var(--text-dim)">${e.ipv6 || "—"}</td>
+                </tr>`).join("")}</tbody>
+            </table>`;
+        })
+        .catch(err => {
+            setBadge("NDP failed");
+            document.getElementById("ndp-panel").innerHTML = `<div class="empty-state" style="color:var(--red)">❌ ${err}</div>`;
+        });
+}
+
+// ── Passive OS Fingerprinting ─────────────────────────────────────────────────
+
+function runPassiveFP() {
+    setBadge("Fingerprinting...");
+    document.getElementById("fp-panel").innerHTML = '<div class="empty-state">⏳ Running passive OS fingerprinting on all devices...</div>';
+    document.getElementById("fp-count").textContent = "";
+    fetch("/api/passive_fp")
+        .then(r => r.json())
+        .then(fps => {
+            document.getElementById("fp-count").textContent = fps.length + " devices";
+            setBadge(fps.length + " fingerprinted");
+            renderFPs(fps);
+        })
+        .catch(err => {
+            setBadge("FP failed");
+            document.getElementById("fp-panel").innerHTML = `<div class="empty-state" style="color:var(--red)">❌ ${err}</div>`;
+        });
+}
+
+function renderFPs(fps) {
+    const el = document.getElementById("fp-panel");
+    if (!fps.length) {
+        el.innerHTML = '<div class="empty-state">No devices to fingerprint — run a full scan first</div>';
+        return;
+    }
+    el.innerHTML = `<table class="device-table">
+        <thead><tr>
+            <th>IP</th><th>TTL</th><th>OS Guess</th>
+            <th>Confidence</th><th>Method</th><th>Details</th>
+        </tr></thead>
+        <tbody>${fps.map(fp => {
+            const cls = fp.confidence === "High" ? "safe" : fp.confidence === "Medium" ? "low" : "medium";
+            return `<tr>
+                <td><a href="/device/${fp.ip}" style="color:var(--cyan);font-family:'Courier New',monospace">${fp.ip}</a></td>
+                <td>${fp.ttl || "—"}</td>
+                <td style="font-weight:600">${fp.os_guess}</td>
+                <td><span class="risk-badge ${cls}">${fp.confidence}</span></td>
+                <td style="font-size:0.72rem;color:var(--text-dim)">${fp.method || "—"}</td>
+                <td style="font-size:0.72rem;color:var(--text-dim)">${fp.detail || "—"}</td>
+            </tr>`;
+        }).join("")}</tbody>
+    </table>`;
+}
+
+// ── CVE Lookup ────────────────────────────────────────────────────────────────
+
 function loadCVEs() {
+    setBadge("Loading CVEs...");
+    document.getElementById("cve-count").textContent = "";
     fetch("/api/scan_results")
         .then(r => r.json())
         .then(results => {
@@ -154,69 +417,60 @@ function loadCVEs() {
                 if (d.cve_results && d.cve_results.length) {
                     d.cve_results.forEach(cr => {
                         cr.cves.forEach(cve => {
-                            allCVEs.push({ip: d.ip, port: cr.port, product: cr.product, version: cr.version, ...cve});
+                            allCVEs.push({ ip: d.ip, port: cr.port, product: cr.product, version: cr.version, ...cve });
                         });
                     });
                 }
             });
+            document.getElementById("cve-count").textContent = allCVEs.length + " CVEs";
+            setBadge(allCVEs.length + " CVEs");
             renderCVEs(allCVEs);
+        })
+        .catch(err => {
+            document.getElementById("cve-panel").innerHTML = `<div class="empty-state" style="color:var(--red)">❌ ${err}</div>`;
         });
 }
 
 function renderCVEs(cves) {
     const el = document.getElementById("cve-panel");
     if (!cves.length) {
-        el.innerHTML = '<div class="empty-state"><div class="empty-icon">✓</div>No CVEs found — all services are up to date</div>';
+        el.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div>No CVEs found — run a full scan with deep scan enabled to populate this</div>';
         return;
     }
-    const sorted = cves.sort((a,b) => b.score - a.score);
+    const sorted = cves.sort((a, b) => b.score - a.score);
     el.innerHTML = `<div style="padding:12px 18px">${sorted.map(c => {
         const cls = c.score >= 9.0 ? "critical" : c.score >= 7.0 ? "high" : c.score >= 4.0 ? "medium" : "low";
-        return `<div class="finding-item ${cls}" style="margin-bottom:10px">
+        return `<div class="finding-item ${cls}" style="margin-bottom:10px;padding:12px 16px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                <strong><a href="${c.url}" target="_blank" style="color:inherit">${c.id}</a></strong>
+                <strong><a href="${c.url||'#'}" target="_blank" style="color:inherit">${c.id}</a></strong>
                 <span class="risk-badge ${cls}">CVSS ${c.score}</span>
             </div>
-            <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:4px">${c.description}</div>
-            <div style="font-size:0.72rem;color:var(--text-dim)">
-                📍 ${c.ip}:${c.port} — ${c.product} ${c.version}
-            </div>
+            <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:4px">${c.description || "No description"}</div>
+            <div style="font-size:0.72rem;color:var(--text-dim)">📍 ${c.ip}:${c.port} — ${c.product || "?"} ${c.version || ""}</div>
         </div>`;
     }).join("")}</div>`;
 }
 
-function runPassiveFP() {
-    document.getElementById("status-badge").textContent = "Fingerprinting...";
-    document.getElementById("fp-panel").innerHTML = '<div class="empty-state">Running passive OS fingerprinting...</div>';
-    fetch("/api/passive_fp")
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function setBadge(txt) {
+    document.getElementById("status-badge").textContent = txt;
+}
+
+// Auto-load CVEs and passive intel on page load
+document.addEventListener("DOMContentLoaded", () => {
+    loadCVEs();
+    // Load existing passive intel from store
+    fetch("/api/passive_intel")
         .then(r => r.json())
-        .then(fps => {
-            document.getElementById("status-badge").textContent = fps.length + " devices fingerprinted";
-            renderFPs(fps);
-        });
-}
-
-function renderFPs(fps) {
-    const el = document.getElementById("fp-panel");
-    if (!fps.length) {
-        el.innerHTML = '<div class="empty-state">No devices to fingerprint</div>';
-        return;
-    }
-    el.innerHTML = `<table class="device-table">
-        <thead><tr><th>IP</th><th>TTL</th><th>OS Guess</th><th>Confidence</th><th>Method</th><th>Detail</th></tr></thead>
-        <tbody>${fps.map(fp => `<tr>
-            <td class="mono" style="color:var(--cyan)">${fp.ip}</td>
-            <td>${fp.ttl || "—"}</td>
-            <td>${fp.os_guess}</td>
-            <td><span class="risk-badge ${fp.confidence === 'High' ? 'safe' : fp.confidence === 'Medium' ? 'low' : 'medium'}">${fp.confidence}</span></td>
-            <td style="font-size:0.75rem;color:var(--text-dim)">${fp.method}</td>
-            <td style="font-size:0.75rem;color:var(--text-dim)">${fp.detail}</td>
-        </tr>`).join("")}</tbody>
-    </table>`;
-}
-
-// Auto-load CVEs on page load
-loadCVEs();
+        .then(data => {
+            const entries = Object.values(data);
+            if (entries.length) {
+                document.getElementById("intel-count").textContent = entries.length + " device(s) in store";
+                renderIntel(data);
+            }
+        }).catch(() => {});
+});
 </script>
 </body>
 </html>

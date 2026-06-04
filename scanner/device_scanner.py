@@ -202,6 +202,51 @@ def resolve_hostname(ip, mac=None):
 
     return "unknown"
 
+
+def best_device_name(ip, mac, passive_intel=None):
+    """
+    Return the best human-readable device name from all available sources.
+    Priority: passive intel (DHCP/mDNS/NetBIOS) > DNS > nmap > avahi > NetBIOS > OUI vendor
+    Never returns empty string — always returns something.
+    """
+    # 1. Passive intel (DHCP hostname is most accurate for phones/laptops)
+    if passive_intel:
+        hn = passive_intel.get("hostname", "")
+        if hn and hn not in ("unknown", ""):
+            return hn
+        dt = passive_intel.get("device_type", "")
+        if dt:
+            return dt
+
+    # 2. DNS reverse lookup (fast)
+    try:
+        name = socket.gethostbyaddr(ip)[0]
+        if name and name != ip and not name.startswith(ip):
+            return name
+    except Exception:
+        pass
+
+    # 3. avahi mDNS (fast, catches Apple/Linux .local names)
+    name = _avahi_hostname(ip)
+    if name:
+        return name
+
+    # 4. NetBIOS (Windows machines)
+    name = _netbios_hostname(ip)
+    if name:
+        return name
+
+    # 5. OUI vendor label — always available from MAC
+    if mac:
+        vendor = mac_vendor(mac)
+        if vendor == "[Randomized MAC]":
+            return "📱 Phone/Laptop"
+        label = vendor_to_label(vendor)
+        if label:
+            return label
+
+    return "Unknown Device"
+
 def get_wifi_subnet():
     """Auto-detect WiFi subnet — use /24 around our IP for practical ARP scanning"""
     try:

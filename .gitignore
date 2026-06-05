@@ -8,3 +8,4 @@ logs/server.log
 *.restore
 .env
 venv/
+logs/.last_subnet

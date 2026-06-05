@@ -9,3 +9,4 @@ logs/server.log
 .env
 venv/
 logs/.last_subnet
+logs/.last_subnet
